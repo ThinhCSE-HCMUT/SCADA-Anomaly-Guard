@@ -1,0 +1,10 @@
+[client]
+showSidebarNavigation = false
+toolbarMode = "viewer"
+[server]
+# Luôn mở ở chế độ wide (full width)
+runOnSave = false
+
+[layout]
+# Buộc Streamlit luôn dùng chế độ wide
+initialSidebarState = "expanded"
