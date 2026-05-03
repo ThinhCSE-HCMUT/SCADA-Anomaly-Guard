@@ -58,7 +58,7 @@ card1, card2, card3, card4 = st.columns(4)
 with card1:
     with st.container(border=True):
         with st.container(height=TEXT_HEIGHT, border=False):
-            st.markdown("### Fleet Overview \n")
+            st.markdown("### System Overview \n")
             st.write("\n")
             st.write("\n")
             st.write("\n\n\nView aggregated sensor readings, current health status, and anomaly rates across all wind turbines.")
@@ -76,7 +76,7 @@ with card3:
         with st.container(height=TEXT_HEIGHT, border=False):
             st.markdown("### Model Testing & Comparison")
             st.write("Evaluate and compare the performance of various machine learning and deep learning models.")
-        st.page_link("pages/05_Model_Testing_and_Comparison.py", label="Go to Model Testing")
+        st.page_link("pages/05_Model_Testing_and_Comparison.py", label="Go to Testing & Comparison")
 
 with card4:
     with st.container(border=True):

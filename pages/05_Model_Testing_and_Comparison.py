@@ -11,14 +11,18 @@ import joblib
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 import plotly.express as px
 from xgboost import XGBClassifier
+from src.model_manager import load_model
+import os
+
+os.environ["TF_USE_LEGACY_KERAS"] = "1"
 
 from src.sidebar import render_sidebar
-from src.config import AVAILABLE_MODELS, DEFAULT_TABLE_ROWS
+from src.config import AVAILABLE_MODELS, DEFAULT_TABLE_ROWS, MODEL_THRESHOLDS
 
 st.set_page_config(
-    page_title="Model Testing and Comparison",  # Tên hiển thị trên tab trình duyệt
-    layout="wide",                 # 🔥 CHÌA KHÓA: Ép trang luôn ở chế độ Full Screen
-    initial_sidebar_state="expanded" # (Tùy chọn) Ép sidebar luôn mở ra
+    page_title="Model Testing and Comparison", 
+    layout="wide",                 
+    initial_sidebar_state="expanded"
 )
 
 @st.cache_resource
@@ -30,20 +34,28 @@ def load_backend_artifacts():
         # 1. Load Scaler
         scaler = joblib.load("models/scada_scaler_full.pkl")
         
-        # 2. Load XGBoost Model
-        xgb_model = XGBClassifier()
-        xgb_model.load_model("models/xgb_model.json")
-        rf_model = joblib.load("models/rf_model.pkl")
-        # LSTM_model = joblib.load("models/lstm.onnx")
+        # 2. Load TẤT CẢ Models tự động thông qua model_manager
+        loaded_models = {}
         
-        # Gói vào dictionary để xài
-        loaded_models = {
-            "XGBoost": xgb_model,
-            "Random Forest": rf_model,
-            # "LSTM": LSTM_model
-        }
+        # Lặp qua tất cả các tên model (XGBoost, Random Forest, LSTM, GRU...)
+        for model_name in AVAILABLE_MODELS.keys():
+            # Truyền ĐÚNG tên model (model_name) vào hàm load_model
+            model = load_model(model_name)
+            
+            # Nếu load thành công thì đưa vào dictionary
+            if model is not None:
+                loaded_models[model_name] = model
+            else:
+                st.warning(f"Không thể nạp được model: {model_name}. Vui lòng kiểm tra lại file.")
+                
+        # (Riêng XGBoost nếu bạn bắt buộc dùng file .json thay vì .pkl thì nạp thủ công ở đây)
+        if "XGBoost" not in loaded_models and os.path.exists("models/xgb_model.json"):
+            xgb_model = XGBClassifier()
+            xgb_model.load_model("models/xgb_model.json")
+            loaded_models["XGBoost"] = xgb_model
         
         return scaler, loaded_models
+        
     except Exception as e:
         st.error(f"Lỗi khi load models: {e}")
         return None, None
@@ -116,15 +128,10 @@ with col1:
 with col2:
     # Lấy danh sách model từ config, nếu chưa có XGBoost thì tự động thêm vào để test
     model_options = list(AVAILABLE_MODELS.keys())
-    if "XGBoost" not in model_options:
-        model_options.append("XGBoost")
-    if "Random Forest" not in model_options:
-        model_options.append("Random Forest")
         
     selected_models = st.multiselect(
         "Select Models to Test",
         options=model_options,
-        default=["XGBoost", "Random Forest"], # Mặc định chọn 2 cái để user thấy tính năng compare
     )
 
 # ====================== PROCESS DATA ======================
@@ -133,7 +140,6 @@ if uploaded_file is not None:
     # 1. Đọc dữ liệu
     df = pd.read_csv(uploaded_file)
     
-    # --- 🌟 CRITICAL FIX: ĐỒNG BỘ DATA VÀ THỜI GIAN TẠI ĐÂY 🌟 ---
     # Ép kiểu datetime để sort không bị sai
     if 'time_stamp' in df.columns:
         df['time_stamp'] = pd.to_datetime(df['time_stamp'])
@@ -175,32 +181,27 @@ if uploaded_file is not None:
                 start_time = time.time()
                 
                 if model_name in ["XGBoost", "Random Forest"]:
-                    try:
-                        if 'asset_id' in df.columns and 'asset_id' not in df_buffer.columns:
-                            df_buffer['asset_id'] = df['asset_id'].iloc[0]
-                        if 'time_stamp' in df.columns and 'time_stamp' not in df_buffer.columns:
-                            start_time_upload = df['time_stamp'].min()
-                            df_buffer['time_stamp'] = [start_time_upload - pd.Timedelta(minutes=i) for i in range(6, 0, -1)]
+                    if 'asset_id' in df.columns and 'asset_id' not in df_buffer.columns:
+                        df_buffer['asset_id'] = df['asset_id'].iloc[0]
+                    if 'time_stamp' in df.columns and 'time_stamp' not in df_buffer.columns:
+                        start_time_upload = df['time_stamp'].min()
+                        df_buffer['time_stamp'] = [start_time_upload - pd.Timedelta(minutes=i) for i in range(6, 0, -1)]
 
-                        common_cols = [c for c in df.columns if c in df_buffer.columns]
-                        df_buffer_clean = df_buffer[common_cols].copy()
-                        
-                        df_buffer_clean['is_buffer'] = True
-                        df_upload_temp = df.copy()
-                        df_upload_temp['is_buffer'] = False
-
-                        df_combined = pd.concat([df_buffer_clean, df_upload_temp], ignore_index=True)
-                        df_combined = df_combined.sort_values(by=['asset_id', 'time_stamp']).reset_index(drop=True)
-
-                        df_rolled_full = apply_rolling_window(df_combined, windows=[3, 6])
-
-                        df_rolled = df_rolled_full[df_rolled_full['is_buffer'] == False].copy()
-                        df_rolled = df_rolled.drop(columns=['is_buffer']).reset_index(drop=True)
-                        
-                    except FileNotFoundError:
-                        st.warning("Không tìm thấy models/train_buffer.csv. Chạy không có bối cảnh quá khứ.")
-                        df_rolled = apply_rolling_window(df, windows=[3, 6])
+                    common_cols = [c for c in df.columns if c in df_buffer.columns]
+                    df_buffer_clean = df_buffer[common_cols].copy()
                     
+                    df_buffer_clean['is_buffer'] = True
+                    df_upload_temp = df.copy()
+                    df_upload_temp['is_buffer'] = False
+
+                    df_combined = pd.concat([df_buffer_clean, df_upload_temp], ignore_index=True)
+                    df_combined = df_combined.sort_values(by=['asset_id', 'time_stamp']).reset_index(drop=True)
+
+                    df_rolled_full = apply_rolling_window(df_combined, windows=[3, 6])
+
+                    df_rolled = df_rolled_full[df_rolled_full['is_buffer'] == False].copy()
+                    df_rolled = df_rolled.drop(columns=['is_buffer']).reset_index(drop=True)
+                        
                     has_label = 'label' in df_rolled.columns
                     y_true = df_rolled['label'] if has_label else None
                     
@@ -209,11 +210,11 @@ if uploaded_file is not None:
                     if hasattr(scaler_ml, 'feature_names_in_'):
                         X_ml_raw = X_ml_raw[scaler_ml.feature_names_in_]
                     
-                    # Chuẩn hóa
+                    # Scale
                     X_scaled_array = scaler_ml.transform(X_ml_raw)
                     X_scaled = pd.DataFrame(X_scaled_array, columns=X_ml_raw.columns)
                     
-                    # Dự đoán
+                    # Predict
                     model = loaded_models.get(model_name)
                     if model is not None:
                         y_pred_class = model.predict(X_scaled)
@@ -221,10 +222,70 @@ if uploaded_file is not None:
                         y_pred_class = np.zeros(len(df_rolled))
                         
                 else:
-                    # Logic cho Deep Learning...
-                    y_pred_class = np.random.choice([0, 1], len(df), p=[0.9, 0.1])
+                    # DL Logic
+                    SEQ_LENGTH = 144
+                    
+                    cols_to_exclude = ['asset_id', 'time_stamp', 'label']
+                    base_features = [c for c in df.columns if c not in cols_to_exclude]
+                    
+                    df_dl_raw = df.copy()
+                    
+                    X_dl_raw = df_dl_raw[base_features]
+
+                    current_asset = df['asset_id'].iloc[0] if 'asset_id' in df.columns else None
+                    
+                    if current_asset is not None:
+                        if isinstance(current_asset, str) and 'asset_' in current_asset:
+                            asset_num = current_asset.replace('asset_', '')
+                        else:
+                            asset_num = int(current_asset)
+                            
+                        scaler_path = f"models/asset_{asset_num}.pkl"
+                        
+                        try:
+                            scaler_dl = joblib.load(scaler_path)
+                            if hasattr(scaler_dl, 'feature_names_in_'):
+                                X_dl_raw = X_dl_raw[scaler_dl.feature_names_in_]
+                                
+                            X_scaled_array = scaler_dl.transform(X_dl_raw)
+                        except FileNotFoundError:
+                            st.error(f"Không tìm thấy Scaler cho turbine {asset_num} tại đường dẫn: '{scaler_path}'. Vui lòng kiểm tra lại!")
+                            st.stop()
+                    else:
+                        st.error("Dữ liệu không có cột 'asset_id' để xác định turbine. Vui lòng kiểm tra lại CSV.")
+                        st.stop()
+                    
+                    
+                    if len(X_scaled_array) < SEQ_LENGTH:
+                        st.warning(f"Dữ liệu tải lên quá ngắn. Cần ít nhất {SEQ_LENGTH} dòng để chạy Deep Learning.")
+                        y_pred_class = np.zeros(len(df_dl_raw))
+                    else:
+                        # (samples, time_steps, features)
+                        X_seq = []
+                        for i in range(len(X_scaled_array) - SEQ_LENGTH + 1):
+                            X_seq.append(X_scaled_array[i : i + SEQ_LENGTH])
+                        X_seq = np.array(X_seq)
+                        
+                        # Predict
+                        model = loaded_models.get(model_name)
+
+                        if model is not None:
+                            y_pred_prob = model.predict(X_seq, verbose=0)
+                            current_threshold = MODEL_THRESHOLDS.get(model_name, 0.5)
+                            y_pred_class_seq = (y_pred_prob >= current_threshold).astype(int).flatten()
+
+                            pad_length = SEQ_LENGTH - 1
+                            y_pred_class = np.pad(y_pred_class_seq, (pad_length, 0), 'constant', constant_values=0)
+
+                        else:
+                            print(f"Model {model_name} not found in loaded_models. Skipping prediction.")
+                            y_pred_class = np.zeros(len(df_dl_raw))
+                            
+                    # Update y_true
+                    has_label = 'label' in df_dl_raw.columns
+                    y_true = df_dl_raw['label'] if has_label else None
                 
-                process_time = (time.time() - start_time) * 1000
+                process_time = (time.time() - start_time)
                 predictions_dict[model_name] = y_pred_class
 
                 anomaly_count = sum(y_pred_class)
@@ -233,14 +294,14 @@ if uploaded_file is not None:
                 # Lưu vào bảng hiển thị
                 model_result = {
                     "Model": model_name,
-                    "Processing Time (ms)": f"{process_time:.1f}",
+                    "Processing Time (s)": f"{process_time:.1f}",
                     "Detected Anomalies": f"{anomaly_count} ({anomaly_rate*100:.1f}%)"
                 }
                 
                 # Lưu vào list raw để vẽ biểu đồ
                 plot_data = {
                     "Model": model_name,
-                    "Processing Time (ms)": process_time,
+                    "Processing Time (s)": process_time,
                     "Anomalies Found": anomaly_count
                 }
 
@@ -328,9 +389,9 @@ if uploaded_file is not None:
                 with col_comp2:
                     # So sánh thời gian xử lý
                     fig_time = px.bar(
-                        df_compare, x="Model", y="Processing Time (ms)", color="Model",
+                        df_compare, x="Model", y="Processing Time (s)", color="Model",
                         title="Processing Speed Comparison (Lower is better)",
-                        text=df_compare["Processing Time (ms)"].round(1).astype(str) + " ms",
+                        text=df_compare["Processing Time (s)"].round(1).astype(str) + " s",
                         color_discrete_sequence=px.colors.qualitative.Set2
                     )
                     fig_time.update_layout(template="plotly_dark")

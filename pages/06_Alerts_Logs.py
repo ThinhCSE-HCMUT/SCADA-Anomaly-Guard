@@ -140,7 +140,7 @@ def render_alert_card(alert):
                     """
                     <div style='text-align: center; background-color: #dcfce7; color: #16a34a; 
                                 border-radius: 5px; padding: 5px 0; border: 1px solid #22c55e;'>
-                        <b style='font-size: 1.2em;'>✓</b> Đã acknowledge
+                        <b style='font-size: 1.2em;'>✓</b> Acknowledged
                     </div>
                     """, 
                     unsafe_allow_html=True

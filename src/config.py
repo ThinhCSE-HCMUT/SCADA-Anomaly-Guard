@@ -20,8 +20,19 @@ SAMPLE_DATA_PATH   = DATA_DIR / "sample_data.csv"
 
 # ====================== MODEL CONFIGURATION ======================
 AVAILABLE_MODELS = {
-    "XGBoost"      : "xgb_model.pkl",
-    "Random Forest": "rf_model.pkl",
+    "XGBoost"                      : "xgb_model.pkl",
+    "Random Forest"                : "rf_model.pkl",
+    "LSTM"                         : "lstm_model.keras",
+    "GRU"                          : "gru_model.keras",
+    "CNN LSTM (Hybrid model)"      : "cnn_lstm_hybrid_model.keras",
+    "CNN GRU (Hybrid model)"       : "cnn_gru_hybrid_model.keras"
+}
+
+MODEL_THRESHOLDS = {
+    "LSTM": 0.6500000000000001,
+    "GRU": 0.6000000000000002,
+    "CNN LSTM (Hybrid model)": 0.45000000000000007,
+    "CNN GRU (Hybrid model)": 0.5500000000000002    
 }
 
 # Full resolved paths — used by load_model()
