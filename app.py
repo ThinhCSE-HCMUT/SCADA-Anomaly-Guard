@@ -5,7 +5,7 @@ Sidebar is now managed centrally in src/sidebar.py
 """
 
 import streamlit as st
-from src.config import APP_TITLE, APP_DESCRIPTION
+from src.config import APP_TITLE, APP_DESCRIPTION, DEFAULT_MODEL, AVAILABLE_MODELS, TARGET_TURBINES
 from src.sidebar import render_sidebar
 
 # ========================= PAGE CONFIG =========================
@@ -20,72 +20,84 @@ st.set_page_config(
 
 # ========================= RENDER SIDEBAR =========================
 selected_model = render_sidebar()
+state = st.session_state
+is_running = state.get("is_monitoring", False)
+alert_count = len(state.get("anomaly_records", []))
+active_model = selected_model or state.get("selected_model", DEFAULT_MODEL)
+fleet_size = len(TARGET_TURBINES)
 
 # ========================= HERO SECTION =========================
-col1, col2 = st.columns([3, 1])
-with col1:
-    st.title(f"{APP_TITLE}")
-    st.markdown(f"**{APP_DESCRIPTION}**")
+st.title(APP_TITLE)
+st.markdown(f"**{APP_DESCRIPTION}**")
+st.caption(
+    f"Monitoring: {'Running' if is_running else 'Idle'}  |  "
+    f"Active model: {active_model}  |  "
+    f"Session alerts: {alert_count}"
+)
 
 st.divider()
 
 # ========================= GLOBAL KPI METRICS =========================
-st.subheader("Live System Metrics")
+st.subheader("System Snapshot")
 kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 
 with kpi1:
-    st.metric(label="Active Turbines", value="5 / 5", delta="All Online")
+    st.metric(label="Active Turbines", value=f"{fleet_size} / {fleet_size}", delta="Fleet ready")
 with kpi2:
-    st.metric(label="Data Stream", value="Connected", delta="Real-time", delta_color="normal")
+    st.metric(
+        label="Monitoring",
+        value="Running" if is_running else "Idle",
+        delta="Live stream" if is_running else "Standby",
+        delta_color="normal" if is_running else "off",
+    )
 with kpi3:
-    st.metric(label="Active Models", value=selected_model, delta="Running", delta_color="normal")
+    st.metric(label="Active Model", value=active_model, delta=f"{len(AVAILABLE_MODELS)} available")
 with kpi4:
-    # Sau này có thể thay bằng count của anomaly_records
-    st.metric(label="Unresolved Anomalies", value="0", delta="-2 from yesterday", delta_color="inverse")
-
-st.markdown("<br>", unsafe_allow_html=True) # Khoảng trống cho thoáng
+    st.metric(label="Session Alerts", value=f"{alert_count}", delta="Logged anomalies")
 
 # ========================= QUICK ACCESS CARDS =========================
 st.subheader("Quick Access")
-st.markdown("Navigate to key modules to explore the system capabilities:")
+st.caption("Open the operational views that matter most.")
 
-# Đặt chiều cao cố định cho VÙNG CHỨA CHỮ (giúp các thẻ tự động cao bằng nhau)
-# Nút st.page_link nằm bên ngoài vùng này sẽ luôn bị đẩy xuống đáy một cách đều đặn!
-TEXT_HEIGHT = 220 
 
-card1, card2, card3, card4 = st.columns(4)
-
-with card1:
+def render_card(title: str, body: str, page_path: str, action_label: str) -> None:
     with st.container(border=True):
-        with st.container(height=TEXT_HEIGHT, border=False):
-            st.markdown("### Fleet Overview \n")
-            st.write("\n")
-            st.write("\n")
-            st.write("\n\n\nView aggregated sensor readings, current health status, and anomaly rates across all wind turbines.")
-        st.page_link("pages/01_Overview.py", label="Go to Overview")
+        st.markdown(f"#### {title}")
+        st.write(body)
+        st.page_link(page_path, label=action_label, width="stretch")
 
-with card2:
-    with st.container(border=True):
-        with st.container(height=TEXT_HEIGHT, border=False):
-            st.markdown("### Real-time Monitor")
-            st.write("Watch the live data stream, run the machine learning simulation, and spot anomalies as they happen.")
-        st.page_link("pages/02_Real-time_Monitor.py", label="Go to Monitor")
 
-with card3:
-    with st.container(border=True):
-        with st.container(height=TEXT_HEIGHT, border=False):
-            st.markdown("### Model Testing & Comparison")
-            st.write("Evaluate and compare the performance of various machine learning and deep learning models.")
-        st.page_link("pages/05_Model_Testing_and_Comparison.py", label="Go to Model Testing")
+row1_left, row1_right = st.columns(2)
+with row1_left:
+    render_card(
+        "Fleet Overview",
+        "View fleet-wide health, sensor aggregates, and anomaly rates in one place.",
+        "pages/01_Overview.py",
+        "Open overview",
+    )
+with row1_right:
+    render_card(
+        "Real-time Monitor",
+        "Watch live batches, compare model output, and inspect the current stream.",
+        "pages/02_Real-time_Monitor.py",
+        "Open monitor",
+    )
 
-with card4:
-    with st.container(border=True):
-        with st.container(height=TEXT_HEIGHT, border=False):
-            st.markdown("### Alerts & Logs")
-            st.write("\n")
-            st.write("\n")
-            st.write("Review historical system alerts, acknowledge active warnings, and export event logs.")
-        st.page_link("pages/06_Alerts_Logs.py", label="Go to Alerts")
+row2_left, row2_right = st.columns(2)
+with row2_left:
+    render_card(
+        "Model Testing & Comparison",
+        "Upload CSV data and compare anomaly detection speed, accuracy, and results.",
+        "pages/05_Model_Testing_and_Comparison.py",
+        "Open model testing",
+    )
+with row2_right:
+    render_card(
+        "Alerts & Logs",
+        "Review active alerts, acknowledge findings, and export the event history.",
+        "pages/06_Alerts_Logs.py",
+        "Open alerts",
+    )
 
 st.divider()
 
