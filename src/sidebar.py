@@ -3,7 +3,7 @@
 import streamlit as st
 
 from src.config import APP_TITLE, DEFAULT_MODEL
-from src.i18n import LANGUAGES, get_language, t
+from src.i18n import LANGUAGES, get_language, set_language, t
 from src.ui import inject_global_styles
 
 
@@ -26,8 +26,9 @@ def render_sidebar():
             options=list(LANGUAGES.keys()),
             index=list(LANGUAGES.keys()).index(language),
             format_func=lambda code: LANGUAGES[code],
-            key="language",
+            key="language_selector",
         )
+        set_language(st.session_state["language_selector"])
 
         st.caption(t("app.description"))
         st.caption(t("sidebar.active_model", model=selected_model))

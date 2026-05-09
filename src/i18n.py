@@ -10,6 +10,7 @@ from src.locales.en import TEXT as EN_TEXT
 from src.locales.vi import TEXT as VI_TEXT
 
 DEFAULT_LANGUAGE = "en"
+LANGUAGE_STATE_KEY = "ui_language"
 LANGUAGES = {
     "en": "English",
     "vi": "Tiếng Việt",
@@ -22,10 +23,10 @@ TRANSLATIONS = {
 
 def ensure_language_state() -> str:
     """Ensure session language exists and is valid."""
-    lang = st.session_state.get("language", DEFAULT_LANGUAGE)
+    lang = st.session_state.get(LANGUAGE_STATE_KEY, DEFAULT_LANGUAGE)
     if lang not in TRANSLATIONS:
         lang = DEFAULT_LANGUAGE
-    st.session_state["language"] = lang
+    st.session_state[LANGUAGE_STATE_KEY] = lang
     return lang
 
 
@@ -36,7 +37,7 @@ def get_language() -> str:
 
 def set_language(language: str) -> None:
     """Set active language code."""
-    st.session_state["language"] = language if language in TRANSLATIONS else DEFAULT_LANGUAGE
+    st.session_state[LANGUAGE_STATE_KEY] = language if language in TRANSLATIONS else DEFAULT_LANGUAGE
 
 
 def t(key: str, **kwargs: Any) -> str:
@@ -52,4 +53,3 @@ def label_for_status(status: str) -> str:
     """Translate status-like values with fallback to original string."""
     key = f"status.{status.lower()}"
     return t(key) if key in TRANSLATIONS[ensure_language_state()] or key in EN_TEXT else status
-
