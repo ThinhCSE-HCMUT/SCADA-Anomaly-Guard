@@ -6,15 +6,17 @@ Sidebar is now managed centrally in src/sidebar.py
 
 import streamlit as st
 from src.config import APP_TITLE, APP_DESCRIPTION, DEFAULT_MODEL, AVAILABLE_MODELS, TARGET_TURBINES
+from src.i18n import get_language, t
 from src.sidebar import render_sidebar
 
 # ========================= PAGE CONFIG =========================
+get_language()
 st.set_page_config(
-    page_title=APP_TITLE,
+    page_title=t("app.title"),
     layout="wide",
     initial_sidebar_state="expanded",
     menu_items={
-        'About': f"{APP_DESCRIPTION}\nDeveloped for Wind Turbine SCADA Anomaly Detection"
+        'About': f"{t('app.description')}\nDeveloped for Wind Turbine SCADA Anomaly Detection"
     }
 )
 
@@ -28,36 +30,36 @@ fleet_size = len(TARGET_TURBINES)
 
 # ========================= HERO SECTION =========================
 st.title(APP_TITLE)
-st.markdown(f"**{APP_DESCRIPTION}**")
+st.markdown(f"**{t('app.description')}**")
 st.caption(
-    f"Monitoring: {'Running' if is_running else 'Idle'}  |  "
-    f"Active model: {active_model}  |  "
-    f"Session alerts: {alert_count}"
+    f"{t('home.monitoring')}: {t('status.running') if is_running else t('status.idle')}  |  "
+    f"{t('home.active_model')}: {active_model}  |  "
+    f"{t('home.session_alerts')}: {alert_count}"
 )
 
 st.divider()
 
 # ========================= GLOBAL KPI METRICS =========================
-st.subheader("System Snapshot")
+st.subheader(t("home.snapshot"))
 kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 
 with kpi1:
-    st.metric(label="Active Turbines", value=f"{fleet_size} / {fleet_size}", delta="Fleet ready")
+    st.metric(label=t("home.active_turbines"), value=f"{fleet_size} / {fleet_size}", delta=t("status.fleet_ready"))
 with kpi2:
     st.metric(
-        label="Monitoring",
-        value="Running" if is_running else "Idle",
-        delta="Live stream" if is_running else "Standby",
+        label=t("home.monitoring"),
+        value=t("status.running") if is_running else t("status.idle"),
+        delta=t("status.live_stream") if is_running else t("status.standby_delta"),
         delta_color="normal" if is_running else "off",
     )
 with kpi3:
-    st.metric(label="Active Model", value=active_model, delta=f"{len(AVAILABLE_MODELS)} available")
+    st.metric(label=t("home.active_model"), value=active_model, delta=f"{len(AVAILABLE_MODELS)} {t('status.available')}")
 with kpi4:
-    st.metric(label="Session Alerts", value=f"{alert_count}", delta="Logged anomalies")
+    st.metric(label=t("home.session_alerts"), value=f"{alert_count}", delta=t("status.logged_anomalies"))
 
 # ========================= QUICK ACCESS CARDS =========================
-st.subheader("Quick Access")
-st.caption("Open the operational views that matter most.")
+st.subheader(t("home.quick_access"))
+st.caption(t("home.quick_access_caption"))
 
 
 def render_card(title: str, body: str, page_path: str, action_label: str) -> None:
@@ -70,36 +72,36 @@ def render_card(title: str, body: str, page_path: str, action_label: str) -> Non
 row1_left, row1_right = st.columns(2)
 with row1_left:
     render_card(
-        "Fleet Overview",
-        "View fleet-wide health, sensor aggregates, and anomaly rates in one place.",
+        t("home.fleet_overview_title"),
+        t("home.fleet_overview_body"),
         "pages/01_Overview.py",
-        "Open overview",
+        t("home.fleet_overview_action"),
     )
 with row1_right:
     render_card(
-        "Real-time Monitor",
-        "Watch live batches, compare model output, and inspect the current stream.",
+        t("home.monitor_title"),
+        t("home.monitor_body"),
         "pages/02_Real-time_Monitor.py",
-        "Open monitor",
+        t("home.monitor_action"),
     )
 
 row2_left, row2_right = st.columns(2)
 with row2_left:
     render_card(
-        "Model Testing & Comparison",
-        "Upload CSV data and compare anomaly detection speed, accuracy, and results.",
+        t("home.testing_title"),
+        t("home.testing_body"),
         "pages/05_Model_Testing_and_Comparison.py",
-        "Open model testing",
+        t("home.testing_action"),
     )
 with row2_right:
     render_card(
-        "Alerts & Logs",
-        "Review active alerts, acknowledge findings, and export the event history.",
+        t("home.alerts_title"),
+        t("home.alerts_body"),
         "pages/06_Alerts_Logs.py",
-        "Open alerts",
+        t("home.alerts_action"),
     )
 
 st.divider()
 
 # ========================= FOOTER =========================
-st.caption("© 2026 SCADA Anomaly Guard. Data is simulated for demonstration purposes.")
+st.caption(t("home.footer"))

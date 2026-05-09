@@ -9,9 +9,12 @@ import streamlit as st
 from plotly.subplots import make_subplots
 from datetime import datetime
 
+from src.i18n import get_language, t
+
 # 🔥 ĐƯA LÊN TRÊN CÙNG: Phải đặt trước tất cả các import module nội bộ có chứa lệnh Streamlit
+get_language()
 st.set_page_config(
-    page_title="Real-time Monitor",  # Tên hiển thị trên tab trình duyệt
+    page_title=t("monitor.title"),  # Tên hiển thị trên tab trình duyệt
     layout="wide",                 # Ép trang luôn ở chế độ Full Screen
     initial_sidebar_state="expanded" # Ép sidebar luôn mở ra
 )
@@ -44,7 +47,7 @@ def _init_state():
         "anomaly_records": [],
         "selected_model" : next(iter(AVAILABLE_MODELS)),
         "stream_done"    : {tid: False for tid in TARGET_TURBINES},
-        "system_logs"    : [{"Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Event": "Real-time Monitor Page Loaded"}]
+        "system_logs"    : [{"Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Event": t("alerts.monitor_loaded")}]
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -56,8 +59,8 @@ raw_df = load_data()
 # ====================== PAGE HEADER ======================
 render_sidebar()
 
-st.title("Real-time Monitor")
-st.markdown("Parallel monitoring of wind turbines — real-time anomaly detection via models.")
+st.title(t("monitor.title"))
+st.markdown(t("monitor.description"))
 st.divider()
 
 
@@ -66,14 +69,14 @@ col1, col2, col3 = st.columns([1.2, 2.5, 1.2])
 
 with col1:
     selected_label = st.selectbox(
-        "Choose Turbine for detail",
+        t("monitor.choose_turbine"),
         options=[TURBINE_LABELS[tid] for tid in TARGET_TURBINES],
     )
     selected_asset = int(selected_label.split("-")[1])
 
 with col2:
     chosen_sensors = st.multiselect(
-        "Choose Sensors to display",
+        t("monitor.choose_sensors"),
         options=CHART_SENSOR_COLS,
         default=CHART_SENSOR_COLS[:5],
         format_func=get_sensor_label,
@@ -84,15 +87,15 @@ with col2:
 
 with col3:
     model_choice = st.selectbox(
-        "Choose Model to predict",
+        t("monitor.choose_model"),
         options=list(AVAILABLE_MODELS.keys()),
         disabled=st.session_state.is_monitoring,
     )
     active_model = load_model(model_choice)
     if active_model is not None:
-        st.caption(f"Model loaded: **{model_choice}**")
+        st.caption(t("monitor.model_loaded", model=model_choice))
     else:
-        st.caption("⚠️ File chưa có — fallback **ground-truth label**")
+        st.caption(f"⚠️ {t('monitor.model_fallback')}")
 
 # Thêm một chút khoảng trống cho đỡ sát vào nhau
 st.markdown("<br>", unsafe_allow_html=True)
@@ -103,20 +106,20 @@ _, col_start, col_stop, _ = st.columns([2, 1, 1, 2])
 
 with col_start:
     start_clicked = st.button(
-        "Start", type="primary",
+        t("monitor.start"), type="primary",
         use_container_width=True,
         disabled=st.session_state.is_monitoring or raw_df.empty,
     )
 
 with col_stop:
     stop_clicked = st.button(
-        "Stop",
+        t("monitor.stop"),
         use_container_width=True,
         disabled=not st.session_state.is_monitoring,
     )
 
 if start_clicked:
-    add_system_log(f"Simulation STARTED using model: {model_choice}")
+    add_system_log(t("alerts.simulation_started", model=model_choice))
     st.session_state.update({
         "is_monitoring"  : True,
         "turbine_steps"  : {tid: 0 for tid in TARGET_TURBINES},
@@ -128,7 +131,7 @@ if start_clicked:
     st.rerun()
 
 if stop_clicked:
-    add_system_log("Simulation STOPPED by user")
+    add_system_log(t("alerts.simulation_stopped"))
     st.session_state.is_monitoring = False
     st.rerun()
 
@@ -144,7 +147,7 @@ if st.session_state.is_monitoring:
     if current_anomaly_count > prev_anomaly_count:
         new_anoms = st.session_state.anomaly_records[prev_anomaly_count:]
         for anom in new_anoms:
-            add_system_log(f"NEW ANOMALY detected: {anom['turbine']} (Score: {anom['score']:.2f})")
+            add_system_log(t("alerts.new_anomaly", turbine=anom['turbine'], score=anom['score']))
 
 # ====================== DERIVED DATA ======================
 history      = st.session_state.history_data
@@ -165,21 +168,21 @@ if not current_data.empty:
 
     m1, m2, m3, m4 = st.columns(4)
     m1.metric(
-        f"{TURBINE_LABELS[selected_asset]} status",
-        "🔴 ANOMALY" if is_anom else "🟢 NORMAL",
-        delta=f"Score: {score:.3f}",
+        t("monitor.turbine_status", turbine=TURBINE_LABELS[selected_asset]),
+        f"🔴 {t('status.anomaly_caps')}" if is_anom else f"🟢 {t('status.normal_caps')}",
+        delta=f"{t('common.score')}: {score:.3f}",
         delta_color="inverse",
     )
-    m2.metric("Model", st.session_state.selected_model)
-    m3.metric(f"Alerts {TURBINE_LABELS[selected_asset]}", n_mine)
-    m4.metric("Total Alerts (all WT)", len(st.session_state.anomaly_records))
+    m2.metric(t("common.model"), st.session_state.selected_model)
+    m3.metric(t("monitor.alerts_for_turbine", turbine=TURBINE_LABELS[selected_asset]), n_mine)
+    m4.metric(t("monitor.total_alerts_all"), len(st.session_state.anomaly_records))
 else:
-    st.info("💡 Press Start button to begin the simulation.")
+    st.info(f"💡 {t('monitor.press_start')}")
 
 st.divider()
 
 # ====================== TURBINE OVERVIEW (5 turbines) ======================
-st.subheader("Latest status — 5 Turbines")
+st.subheader(t("monitor.latest_status"))
 
 ov_cols = st.columns(5)
 
@@ -189,8 +192,8 @@ for i, tid in enumerate(TARGET_TURBINES):
     if sub.empty:
         ov_cols[i].metric(
             label=f"⏳ {TURBINE_LABELS[tid]}",
-            value="Waiting...",
-            delta=f"Step {st.session_state.turbine_steps.get(tid, 0)}"
+            value=t("common.waiting_data"),
+            delta=f"{t('monitor.step')} {st.session_state.turbine_steps.get(tid, 0)}"
         )
         continue
 
@@ -210,16 +213,16 @@ for i, tid in enumerate(TARGET_TURBINES):
 
     ov_cols[i].metric(
         label=f"{'🔴' if is_a else '🟢'} {TURBINE_LABELS[tid]}",
-        value="ANOMALY" if is_a else "NORMAL",
-        delta=f"{n_a} alerts ({pct:.0f}%) {alert_delta_str if alert_delta_str else ''}",
+        value=t("status.anomaly_caps") if is_a else t("status.normal_caps"),
+        delta=f"{n_a} {t('monitor.alerts_suffix')} ({pct:.0f}%) {alert_delta_str if alert_delta_str else ''}",
         delta_color=alert_delta_color
     )
 
 st.divider()
 
 # ====================== LIVE SENSOR CHART ======================
-live_flag = " 🔴 LIVE" if st.session_state.is_monitoring else " ⏸ Paused"
-st.subheader(f"Live Sensor Trends — {TURBINE_LABELS[selected_asset]}{live_flag}")
+live_flag = f" 🔴 {t('status.live')}" if st.session_state.is_monitoring else f" ⏸ {t('status.paused')}"
+st.subheader(t("monitor.live_sensor_trends", turbine=TURBINE_LABELS[selected_asset], flag=live_flag))
 
 if not current_data.empty and chosen_sensors:
     valid_sensors = [c for c in chosen_sensors if c in current_data.columns]
@@ -264,7 +267,7 @@ if not current_data.empty and chosen_sensors:
                 hovertemplate=(
                     f"<b>{label_name}</b><br>"
                     "%{x|%Y-%m-%d %H:%M}<br>"
-                    f"Value: %{{y:.3f}} {unit}<extra></extra>"
+                    f"{t('common.value')}: %{{y:.3f}} {unit}<extra></extra>"
                 ),
             ),
             row=row_idx, col=1,
@@ -276,13 +279,13 @@ if not current_data.empty and chosen_sensors:
                     x=anom_pts['time_stamp'], y=anom_pts[col],
                     mode='markers',
                     marker=dict(color=STATUS_COLORS["Anomaly"], size=5),
-                    name="Anomaly" if row_idx == 1 else None,
+                    name=t("monitor.anomaly_label") if row_idx == 1 else None,
                     showlegend=(row_idx == 1),
                     customdata=anom_pts['anomaly_score'],
                     hovertemplate=(
-                        "<b>ANOMALY</b><br>%{x|%H:%M}<br>"
+                        f"<b>{t('monitor.anomaly_label').upper()}</b><br>%{{x|%H:%M}}<br>"
                         f"{label_name}: %{{y:.3f}}<br>"
-                        "Score: %{customdata:.3f}<extra></extra>"
+                        f"{t('common.score')}: %{{customdata:.3f}}<extra></extra>"
                     ),
                 ),
                 row=row_idx, col=1,
@@ -316,18 +319,18 @@ if not current_data.empty and chosen_sensors:
     n_anom = int(cd['pred_label'].sum()) if 'pred_label' in cd.columns else 0
     st.caption(
         f"📌 **{TURBINE_LABELS[selected_asset]}** — "
-        f"{n_anom}/{total} điểm anomaly ({n_anom/total*100:.1f}%) · "
-        f"Model: **{st.session_state.selected_model}** · "
+        f"{n_anom}/{total} {t('status.anomaly')} ({n_anom/total*100:.1f}%) · "
+        f"{t('common.model')}: **{st.session_state.selected_model}** · "
     )
 
 else:
-    st.warning("No data available. Press Start Button to begin.")
+    st.warning(t("monitor.no_data"))
 
 st.divider()
 
 # ====================== ANOMALY LOG ======================
 if st.session_state.anomaly_records:
-    st.subheader("Anomaly Log")
+    st.subheader(t("monitor.anomaly_log"))
     log_df = (
         pd.DataFrame(st.session_state.anomaly_records)
         .sort_values('time', ascending=False)
@@ -336,11 +339,11 @@ if st.session_state.anomaly_records:
     )
     log_df['time'] = log_df['time'].dt.strftime('%Y-%m-%d %H:%M')
     st.dataframe(
-        log_df.rename(columns={'time': 'Time stamp', 'turbine': 'Turbine', 'score': 'Anomaly Score'}),
+        log_df.rename(columns={'time': t("table.time_stamp"), 'turbine': t("table.turbine"), 'score': t("table.anomaly_score")}),
         use_container_width=True, hide_index=True,
         column_config={
-            "Anomaly Score": st.column_config.ProgressColumn(
-                "Anomaly Score", min_value=0.0, max_value=1.0, format="%.3f",
+            t("table.anomaly_score"): st.column_config.ProgressColumn(
+                t("table.anomaly_score"), min_value=0.0, max_value=1.0, format="%.3f",
             )
         },
     )

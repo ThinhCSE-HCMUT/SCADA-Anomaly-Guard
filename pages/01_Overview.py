@@ -10,6 +10,7 @@ import pandas as pd
 import numpy as np
 
 
+from src.i18n import get_language, t
 from src.sidebar import render_sidebar
 from src.config import (
     STATUS_COLORS, 
@@ -20,15 +21,16 @@ from src.config import (
 )
 from src.simulation import run_simulation_step
 
+get_language()
 st.set_page_config(
-    page_title="System Overview", 
+    page_title=t("overview.title"), 
     layout="wide",                
     initial_sidebar_state="expanded" 
 )
 
 selected_model = render_sidebar()
 
-st.title("System Overview")
+st.title(t("overview.title"))
 
 # ====================== DATA LOADING ======================
 # Lấy dữ liệu live từ session_state (được sinh ra bởi engine)
@@ -44,8 +46,8 @@ if df_live.empty:
     
     with col2:
         st.warning(
-            "**No Active Data Stream**\n\n"
-            "The system is waiting for data connection. Please start the simulation to view the overview dashboard.", 
+            f"**{t('overview.no_stream_title')}**\n\n"
+            f"{t('overview.no_stream_body')}", 
         )
         
         # CỘT LỒNG CỘT: Tạo 3 cột nhỏ gọn bên trong col2 chỉ để bọc cái nút
@@ -54,7 +56,7 @@ if df_live.empty:
         
         with btn_col:
             # Nút bấm giờ sẽ bị ép lại gọn gàng trong btn_col và nằm giữa màn hình
-            if st.button("Go to Monitor", use_container_width=True):
+            if st.button(t("common.go_to_monitor"), use_container_width=True):
                 st.switch_page("pages/02_Real-time_Monitor.py") 
                 
     st.stop()
@@ -78,38 +80,38 @@ col1, col2, col3, col4 = st.columns(4)
 
 with col1:
     st.metric(
-        label="Total Monitored Turbines",
+        label=t("overview.total_monitored_turbines"),
         value=f"{total_turbines}",
     )
 
 with col2:
     st.metric(
-        label="Current Anomaly Rate",
+        label=t("overview.current_anomaly_rate"),
         value=f"{anomaly_rate:.1f}%",
-        delta="Warning" if anomaly_rate > 10 else "Stable",
+        delta=t("status.warning_delta") if anomaly_rate > 10 else t("status.stable_delta"),
         delta_color="inverse" if anomaly_rate > 10 else "normal"
     )
 
 with col3:
     st.metric(
-        label="Avg Anomaly Score",
+        label=t("overview.avg_anomaly_score"),
         value=f"{avg_score:.1f}%",
-        delta="High Risk" if avg_score > 60 else "Low Risk",
+        delta=t("status.high_risk_delta") if avg_score > 60 else t("status.low_risk_delta"),
         delta_color="inverse" if avg_score > 60 else "normal"
     )
 
 with col4:
     st.metric(
-        label="Total Alerts (Session)",
+        label=t("overview.total_alerts"),
         value=f"{total_alerts}",
-        delta="Needs attention" if total_alerts > 0 else "All clear",
+        delta=t("status.needs_attention_delta") if total_alerts > 0 else t("status.all_clear_delta"),
         delta_color="inverse" if total_alerts > 0 else "normal"
     )
 
 st.divider()
 
 # ====================== CHARTS ======================
-st.subheader("Anomaly Rate by Turbine")
+st.subheader(t("overview.rate_by_turbine"))
 
 if not df_live.empty:
     # 1. Tính tổng số dòng và số lỗi của từng Turbine
@@ -129,9 +131,9 @@ if not df_live.empty:
         df_rate, 
         x="turbine_name", 
         y="anomaly_rate", 
-        title="Current Anomaly Rate per Turbine",
+        title=t("overview.current_rate_chart"),
         template="plotly_dark",
-        labels={"turbine_name": "Turbine", "anomaly_rate": "Anomaly Rate (%)"},
+        labels={"turbine_name": t("common.turbine"), "anomaly_rate": t("overview.anomaly_rate_label")},
         text=df_rate['anomaly_rate'].apply(lambda x: f"{x:.1f}%") # Hiện con số % ngay trên đầu cột
     )
     
@@ -146,7 +148,7 @@ if not df_live.empty:
     fig.update_layout(
         height=450, # Có thể tăng height lên một chút (450) cho cân đối khi nó full width
         yaxis=dict(
-            title="Anomaly Rate (%)",
+            title=t("overview.anomaly_rate_axis"),
             range=[0, 80], # Khóa cứng trục Y từ 0 đến 100% (có thể giảm xuống [0, 20] nếu ít lỗi)
             showgrid=True,
             gridcolor="rgba(255,255,255,0.1)"
@@ -157,10 +159,10 @@ if not df_live.empty:
     st.plotly_chart(fig, use_container_width=True)
 else:
     # Placeholder khi chưa có data
-    st.info("💡 Waiting for simulation data...")
+    st.info(f"💡 {t('overview.waiting_simulation')}")
 
 # ====================== SENSORS QUICK VIEW ======================
-st.subheader("Average Sensor Readings (Latest Snapshot)")
+st.subheader(t("overview.average_sensor_readings"))
 
 if not df_live.empty:
     # 1. Tạo danh sách tất cả các sensor có trong SENSOR_GROUPS
@@ -182,15 +184,16 @@ if not df_live.empty:
         prev_vals = df_trend.iloc[-2] if len(df_trend) > 1 else None
 
         # 3. Render Tabs
-        tab_names = ["All"] + list(SENSOR_GROUPS.keys())
+        tab_names = [t("overview.all")] + [t(f"group.{group_name}") for group_name in SENSOR_GROUPS.keys()]
         tabs = st.tabs(tab_names)
         
         for i, tab_name in enumerate(tab_names):
             with tabs[i]:
-                if tab_name == "All":
+                if i == 0:
                     valid_sensors = available_sensors
                 else:
-                    valid_sensors = [s for s in SENSOR_GROUPS[tab_name] if s in available_sensors]
+                    group_name = list(SENSOR_GROUPS.keys())[i - 1]
+                    valid_sensors = [s for s in SENSOR_GROUPS[group_name] if s in available_sensors]
                 
                 if valid_sensors:
                     cols = st.columns(3)
@@ -214,19 +217,19 @@ if not df_live.empty:
                                 delta_color="normal" # Mặc định: Tăng = Xanh, Giảm = Đỏ
                             )
                 else:
-                    st.info("Không có dữ liệu cảm biến cho nhóm này.")
+                    st.info(t("overview.no_sensor_group_data"))
 else:
-    st.info("💡 Waiting for sensor data...")
+    st.info(f"💡 {t('overview.waiting_sensor')}")
 
 st.divider()
-st.caption("Tip: Click on 'Real-time Monitor' or 'Turbines List' in the sidebar to explore more details.")
+st.caption(t("overview.tip"))
 
 # ====================== TRIGGER AUTO RERUN ======================
 # Nếu công tắc đang bật, tiếp tục gọi engine cắt data và tự động refresh trang
 if is_running:
     status = run_simulation_step()
     if status == "DONE":
-        st.success("✅ Đã stream hết toàn bộ dữ liệu 5 turbines!")
+        st.success(f"✅ {t('overview.stream_done')}")
     else:
         # Delay 1 chút để chống giật lag UI
         time.sleep(1) 

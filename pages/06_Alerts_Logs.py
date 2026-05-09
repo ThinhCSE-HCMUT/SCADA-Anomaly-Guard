@@ -7,11 +7,13 @@ import streamlit as st
 import pandas as pd
 import time
 from datetime import datetime
+from src.i18n import get_language, t
 from src.sidebar import render_sidebar
 from src.config import STATUS_COLORS, TURBINE_LABELS
 
+get_language()
 st.set_page_config(
-    page_title="Alert Logs",  # Tên hiển thị trên tab trình duyệt
+    page_title=t("alerts.title"),  # Tên hiển thị trên tab trình duyệt
     layout="wide",                 # 🔥 CHÌA KHÓA: Ép trang luôn ở chế độ Full Screen
     initial_sidebar_state="expanded" # (Tùy chọn) Ép sidebar luôn mở ra
 )
@@ -29,7 +31,7 @@ if "anomaly_records" not in st.session_state:
 
 if "system_logs" not in st.session_state:
     st.session_state.system_logs = [
-        {"Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Event": "System initialized and dashboard loaded"}
+        {"Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Event": t("alerts.system_initialized")}
     ]
 def add_system_log(event_message):
     """Hàm tiện ích để ghi lại sự kiện mới vào hệ thống"""
@@ -39,8 +41,8 @@ def add_system_log(event_message):
 
 selected_model = render_sidebar()
 
-st.title("Alerts & Logs")
-st.markdown("### System Alerts and Event History")
+st.title(t("alerts.title"))
+st.markdown(f"### {t('alerts.description')}")
 
 # ====================== DATA PROCESSING ======================
 # Lấy dữ liệu log từ hệ thống mô phỏng
@@ -64,34 +66,34 @@ col1, col2, col3 = st.columns([2, 2, 2])
 
 with col1:
     alert_type = st.selectbox(
-        "Alert Type",
-        options=["All Alerts", "Anomaly"] # Hiện tại engine chỉ log Anomaly
+        t("alerts.alert_type"),
+        options=[t("alerts.all_alerts"), t("alerts.anomaly")] # Hiện tại engine chỉ log Anomaly
     )
 
 with col2:
     time_range = st.selectbox(
-        "Show Events",
-        options=["Last 50 events", "Last 200 events", "All Time"],
+        t("alerts.show_events"),
+        options=[t("alerts.last_50"), t("alerts.last_200"), t("alerts.all_time")],
         index=0
     )
 
 with col3:
     # Lấy danh sách turbine linh động từ file config
-    turbine_options = ["All Turbines"] + list(TURBINE_LABELS.values())
-    turbine_filter = st.selectbox("Turbine", options=turbine_options)
+    turbine_options = [t("alerts.all_turbines")] + list(TURBINE_LABELS.values())
+    turbine_filter = st.selectbox(t("alerts.turbine"), options=turbine_options)
 
 # Apply filters
 if not df_alerts.empty:
-    if turbine_filter != "All Turbines":
+    if turbine_filter != t("alerts.all_turbines"):
         df_alerts = df_alerts[df_alerts["turbine"] == turbine_filter]
         
-    if time_range == "Last 50 events":
+    if time_range == t("alerts.last_50"):
         df_alerts = df_alerts.head(50)
-    elif time_range == "Last 200 events":
+    elif time_range == t("alerts.last_200"):
         df_alerts = df_alerts.head(200)
 
 # ====================== DISPLAY ALERTS ======================
-st.subheader(f"Recent Alerts ({len(df_alerts)} active events)")
+st.subheader(t("alerts.recent", count=len(df_alerts)))
 
 # ĐỊNH NGHĨA FRAGMENT: Độc lập hóa khu vực này để không bị F5 cả trang
 def render_alert_card(alert):
@@ -105,7 +107,7 @@ def render_alert_card(alert):
                         border-left: 4px solid #22c55e; border-radius: 4px; 
                         padding: 10px 15px; margin-bottom: 1rem;">
                 <span style="font-weight: bold; font-size: 1.1em; margin-right: 8px;">✓</span> 
-                Acknowledged: <b>{alert['turbine']}</b> issue resolved at {alert['time'].strftime('%H:%M:%S')}.
+                {t('alerts.acknowledged_issue', turbine=f"<b>{alert['turbine']}</b>", time=alert['time'].strftime('%H:%M:%S'))}
             </div>
             """, 
             unsafe_allow_html=True
@@ -113,8 +115,8 @@ def render_alert_card(alert):
         return # Dừng vẽ thẻ đỏ ở dưới
 
     # 2. Trạng thái CHƯA XÁC NHẬN -> Hiện thẻ cảnh báo (Alert Card)
-    level = "Anomaly" 
-    color = STATUS_COLORS.get(1, "#ef4444")
+    level = t("alerts.level")
+    color = STATUS_COLORS.get("Anomaly", "#ef4444")
     
     with st.container(border=True):
         cols = st.columns([1.5, 2.5, 2, 2, 1.5])
@@ -128,27 +130,27 @@ def render_alert_card(alert):
                 <span style="color:{color}; font-weight:bold;">● {level}</span>
             """, unsafe_allow_html=True)
         with cols[3]:
-            st.write(f"Score: **{alert['score']:.2f}**")
+            st.write(t("alerts.score", score=alert['score']))
         with cols[4]:
             # Tạo một không gian trống (placeholder) để nhét nút vào
             action_ph = st.empty()
             
             # Vẽ nút vào placeholder
-            if action_ph.button("Acknowledge", key=f"btn_{alert_id}", use_container_width=True):
+            if action_ph.button(t("alerts.ack_button"), key=f"btn_{alert_id}", use_container_width=True):
                 # KHI BẤM NÚT: Thay thế cái nút bằng dòng chữ báo thành công
                 action_ph.markdown(
                     """
                     <div style='text-align: center; background-color: #dcfce7; color: #16a34a; 
                                 border-radius: 5px; padding: 5px 0; border: 1px solid #22c55e;'>
-                        <b style='font-size: 1.2em;'>✓</b> Đã acknowledge
+                        <b style='font-size: 1.2em;'>✓</b> {label}
                     </div>
-                    """, 
+                    """.format(label=t("alerts.acknowledged_badge")),
                     unsafe_allow_html=True
                 )
                 
                 # Cập nhật Data & Log
                 st.session_state.acknowledged_alerts.add(alert_id)
-                add_system_log(f"Alert Acknowledged: Anomaly cleared for {alert['turbine']} (Score: {alert['score']:.2f})")
+                add_system_log(t("alerts.alert_cleared", turbine=alert['turbine'], score=alert['score']))
                 
                 # Dừng hình 2 giây cho user kịp nhìn UI/UX
                 time.sleep(2)
@@ -156,17 +158,17 @@ def render_alert_card(alert):
                 # Ép Streamlit reload trang để cập nhật lại danh sách phân trang
                 st.rerun() 
                 
-        st.caption(f"System detected abnormal behavior exceeding threshold. Confidence score is {alert['score']:.2f}.")
+        st.caption(t("alerts.system_detected", score=alert['score']))
 # XUẤT RA GIAO DIỆN
 if df_alerts.empty:
     if len(st.session_state.anomaly_records) == 0:
-        st.info("Waiting for simulation data... No anomalies detected yet.")
+        st.info(t("alerts.no_anomalies"))
     else:
         st.markdown("""
             <div style="color: #22c55e; padding: 15px; border: 1px solid #22c55e; border-radius: 5px;">
-                All clear! All anomalies have been acknowledged or filtered out.
+                {label}
             </div>
-        """, unsafe_allow_html=True)
+        """.format(label=t("alerts.all_clear")), unsafe_allow_html=True)
 else:
     # ====================== PAGINATION CALCULATION ======================
     ITEMS_PER_PAGE = 10
@@ -184,7 +186,7 @@ else:
     end_idx = start_idx + ITEMS_PER_PAGE
     paginated_df = df_alerts.iloc[start_idx:end_idx]
 
-    st.caption(f"Showing **{start_idx + 1} - {min(end_idx, total_items)}** of **{total_items}** active events.")
+    st.caption(t("alerts.showing_range", start=start_idx + 1, end=min(end_idx, total_items), total=total_items))
 
     # 1. VẼ CÁC ALERT CARD TRƯỚC (NẰM Ở TRÊN)
     for _, alert in paginated_df.iterrows():
@@ -199,7 +201,7 @@ else:
         
         # --- Nút Previous ---
         with col_prev:
-            if st.button("◀ Prev", disabled=(current_page == 1), use_container_width=True):
+            if st.button(t("alerts.prev"), disabled=(current_page == 1), use_container_width=True):
                 st.session_state.alert_page -= 1
                 st.rerun()
                 
@@ -228,14 +230,14 @@ else:
                     
         # --- Nút Next ---
         with col_next:
-             if st.button("Next ▶", disabled=(current_page == total_pages), use_container_width=True):
+             if st.button(t("alerts.next"), disabled=(current_page == total_pages), use_container_width=True):
                 st.session_state.alert_page += 1
                 st.rerun()
 
 st.divider()
 
 # ====================== LOG HISTORY ======================
-st.subheader("System Log")
+st.subheader(t("alerts.system_log"))
 
 # Chuyển đổi list dictionary thành DataFrame để hiển thị đẹp hơn
 if st.session_state.system_logs:
@@ -244,16 +246,20 @@ else:
     # Fallback dự phòng nếu chưa có log nào
     df_log = pd.DataFrame(columns=["Timestamp", "Event"])
 
-st.dataframe(df_log, use_container_width=True, hide_index=True)
+st.dataframe(
+    df_log.rename(columns={"Timestamp": t("table.timestamp"), "Event": t("table.event")}),
+    use_container_width=True,
+    hide_index=True,
+)
 
 # Thêm nút Export cho có cảm giác chuyên nghiệp
 if not df_log.empty:
     csv = df_log.to_csv(index=False).encode('utf-8')
     st.download_button(
-        label="Download Log Report",
+        label=t("alerts.download"),
         data=csv,
         file_name=f"scada_system_log_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
         mime="text/csv",
     )
 
-st.caption(f"Total events logged: {len(df_log)}. All alerts are logged and can be exported for reporting.")
+st.caption(t("alerts.total_logged", count=len(df_log)))

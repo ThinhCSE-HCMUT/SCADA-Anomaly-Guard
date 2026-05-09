@@ -12,11 +12,13 @@ from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_sc
 import plotly.express as px
 from xgboost import XGBClassifier
 
+from src.i18n import get_language, t
 from src.sidebar import render_sidebar
 from src.config import AVAILABLE_MODELS, DEFAULT_TABLE_ROWS
 
+get_language()
 st.set_page_config(
-    page_title="Model Testing and Comparison",  # Tên hiển thị trên tab trình duyệt
+    page_title=t("testing.title"),  # Tên hiển thị trên tab trình duyệt
     layout="wide",                 # 🔥 CHÌA KHÓA: Ép trang luôn ở chế độ Full Screen
     initial_sidebar_state="expanded" # (Tùy chọn) Ép sidebar luôn mở ra
 )
@@ -45,7 +47,7 @@ def load_backend_artifacts():
         
         return scaler, loaded_models
     except Exception as e:
-        st.error(f"Lỗi khi load models: {e}")
+        st.error(t("common.model_load_failed", model=t("testing.model_unknown"), error=e))
         return None, None
 
 def apply_rolling_window(df_raw, windows=[3, 6]):
@@ -102,14 +104,26 @@ df_buffer = load_buffer()
 # ====================== GIAO DIỆN CHÍNH ======================
 selected_model_sidebar = render_sidebar()
 
-st.title("Model Testing & Comparison")
-st.markdown("### Run Anomaly Detection and Compare Performance")
+st.title(t("testing.title"))
+st.markdown(f"### {t('testing.description')}")
+
+model_col = t("table.model_column")
+processing_time_col = t("table.processing_time")
+detected_anomalies_col = t("table.detected_anomalies")
+accuracy_col = t("table.accuracy")
+f1_col = t("table.f1_score")
+precision_col = t("table.precision")
+recall_col = t("table.recall")
+anomalies_found_col = t("testing.anomalies_found")
+status_col = t("common.status")
+count_col = t("table.count")
+score_col = t("table.score_column")
 
 col1, col2 = st.columns([3, 2])
 
 with col1:
     uploaded_file = st.file_uploader(
-        "Upload SCADA Data (CSV)",
+        t("testing.upload"),
         type=["csv"],
     )
 
@@ -122,7 +136,7 @@ with col2:
         model_options.append("Random Forest")
         
     selected_models = st.multiselect(
-        "Select Models to Test",
+        t("testing.select_models"),
         options=model_options,
         default=["XGBoost", "Random Forest"], # Mặc định chọn 2 cái để user thấy tính năng compare
     )
@@ -143,22 +157,22 @@ if uploaded_file is not None:
         df = df.sort_values(by=['asset_id', 'time_stamp']).reset_index(drop=True)
     # -------------------------------------------------------------
         
-    st.success(f"Loaded {len(df)} records from uploaded file")
+    st.success(t("testing.loaded_records", count=len(df)))
 
-    st.subheader("Data Preview")
+    st.subheader(t("testing.data_preview"))
     st.dataframe(df.head(DEFAULT_TABLE_ROWS), use_container_width=True)
 
     # Nút chạy dự đoán canh giữa
     col_left, col_mid, col_right = st.columns([1, 0.5, 1])
     with col_mid:
-        run_button = st.button("Run Prediction", type="primary", use_container_width=True)
+        run_button = st.button(t("testing.run_prediction"), type="primary", use_container_width=True)
         
     if run_button:
         if not selected_models:
-            st.warning("Please select at least one model!")
+            st.warning(t("testing.select_one_model"))
             st.stop()
 
-        with st.spinner("Running inference on selected models..."):
+        with st.spinner(t("testing.loading_inference")):
             
             has_label = 'label' in df.columns
             y_true = df['label'] if has_label else None
@@ -198,7 +212,7 @@ if uploaded_file is not None:
                         df_rolled = df_rolled.drop(columns=['is_buffer']).reset_index(drop=True)
                         
                     except FileNotFoundError:
-                        st.warning("Không tìm thấy models/train_buffer.csv. Chạy không có bối cảnh quá khứ.")
+                        st.warning(t("testing.no_buffer"))
                         df_rolled = apply_rolling_window(df, windows=[3, 6])
                     
                     has_label = 'label' in df_rolled.columns
@@ -232,73 +246,73 @@ if uploaded_file is not None:
 
                 # Lưu vào bảng hiển thị
                 model_result = {
-                    "Model": model_name,
-                    "Processing Time (ms)": f"{process_time:.1f}",
-                    "Detected Anomalies": f"{anomaly_count} ({anomaly_rate*100:.1f}%)"
+                    model_col: model_name,
+                    processing_time_col: f"{process_time:.1f}",
+                    detected_anomalies_col: f"{anomaly_count} ({anomaly_rate*100:.1f}%)"
                 }
                 
                 # Lưu vào list raw để vẽ biểu đồ
                 plot_data = {
-                    "Model": model_name,
-                    "Processing Time (ms)": process_time,
-                    "Anomalies Found": anomaly_count
+                    model_col: model_name,
+                    processing_time_col: process_time,
+                    anomalies_found_col: anomaly_count
                 }
 
                 if has_label and y_true is not None:
                     acc = accuracy_score(y_true, y_pred_class)
                     f1 = f1_score(y_true, y_pred_class, zero_division=0)
-                    model_result["Accuracy"] = f"{acc:.3f}"
-                    model_result["F1-Score"] = f"{f1:.3f}"
-                    model_result["Precision"] = f"{precision_score(y_true, y_pred_class, zero_division=0):.3f}"
-                    model_result["Recall"] = f"{recall_score(y_true, y_pred_class, zero_division=0):.3f}"
+                    model_result[accuracy_col] = f"{acc:.3f}"
+                    model_result[f1_col] = f"{f1:.3f}"
+                    model_result[precision_col] = f"{precision_score(y_true, y_pred_class, zero_division=0):.3f}"
+                    model_result[recall_col] = f"{recall_score(y_true, y_pred_class, zero_division=0):.3f}"
                     
-                    plot_data["Accuracy"] = acc
-                    plot_data["F1-Score"] = f1
+                    plot_data[accuracy_col] = acc
+                    plot_data[f1_col] = f1
                 else:
-                    model_result["F1-Score"] = "N/A"
+                    model_result[f1_col] = "N/A"
 
                 results.append(model_result)
                 raw_metrics_for_plot.append(plot_data)
 
-            st.success("Prediction completed!")
-            st.toast("Model prediction completed successfully!", icon="✅")
+            st.success(t("testing.prediction_completed"))
+            st.toast(t("testing.prediction_toast"), icon="✅")
             
             # --- TỔNG HỢP KẾT QUẢ ---
-            st.subheader("Results Summary")
+            st.subheader(t("testing.results_summary"))
             result_df = pd.DataFrame(results)
             st.dataframe(result_df, use_container_width=True, hide_index=True)
 
             # --- BIỂU ĐỒ CHI TIẾT TỪNG MODEL ---
-            st.subheader("Detailed Prediction Dashboard")
+            st.subheader(t("testing.detailed_dashboard"))
             for model_name in selected_models:
-                with st.expander(f"Detailed Results: {model_name}", expanded=True): # Đổi thành False cho gọn gàng khi có nhiều model
+                with st.expander(t("testing.detailed_results", model=model_name), expanded=True): # Đổi thành False cho gọn gàng khi có nhiều model
                     y_pred_m = predictions_dict[model_name]
                     
                     c1, c2 = st.columns([1, 3])
                     with c1:
-                        st.metric("Total Samples", len(df))
-                        st.metric("Anomalies Found", sum(y_pred_m))
+                        st.metric(t("testing.total_samples"), len(df))
+                        st.metric(t("testing.anomalies_found"), sum(y_pred_m))
                         if has_label:
-                            st.metric("Real Anomalies", sum(y_true))
+                            st.metric(t("testing.real_anomalies"), sum(y_true))
                             
                     with c2:
                         anomaly_count = sum(y_pred_m)
                         normal_count = len(y_pred_m) - anomaly_count
                         
                         pie_data = pd.DataFrame({
-                            "Status": ["Normal Predicted (0)", "Anomaly Predicted (1)"],
-                            "Count": [normal_count, anomaly_count]
+                            status_col: [t("testing.normal_predicted"), t("testing.anomaly_predicted")],
+                            count_col: [normal_count, anomaly_count]
                         })
                         
                         fig = px.pie(
                             pie_data, 
-                            names="Status", 
-                            values="Count", 
-                            title=f"Prediction Distribution - {model_name}",
-                            color="Status",
+                            names=status_col, 
+                            values=count_col, 
+                            title=t("testing.prediction_distribution", model=model_name),
+                            color=status_col,
                             color_discrete_map={
-                                "Normal Predicted (0)": "#22c55e",  
-                                "Anomaly Predicted (1)": "#ef4444"  
+                                t("testing.normal_predicted"): "#22c55e",  
+                                t("testing.anomaly_predicted"): "#ef4444"  
                             },
                             hole=0.45 
                         )
@@ -308,7 +322,7 @@ if uploaded_file is not None:
 
             if len(selected_models) >= 2:
                 st.markdown("---")
-                st.subheader("Models Comparison Analysis")
+                st.subheader(t("testing.models_comparison"))
                 
                 df_compare = pd.DataFrame(raw_metrics_for_plot)
                 
@@ -317,9 +331,9 @@ if uploaded_file is not None:
                 with col_comp1:
                     # So sánh số lượng bất thường tìm được
                     fig_anom = px.bar(
-                        df_compare, x="Model", y="Anomalies Found", color="Model",
-                        title="Total Anomalies Detected by Model",
-                        text="Anomalies Found",
+                        df_compare, x=model_col, y=anomalies_found_col, color=model_col,
+                        title=t("testing.total_anomalies_detected"),
+                        text=anomalies_found_col,
                         color_discrete_sequence=px.colors.qualitative.Pastel
                     )
                     fig_anom.update_layout(template="plotly_dark")
@@ -328,9 +342,9 @@ if uploaded_file is not None:
                 with col_comp2:
                     # So sánh thời gian xử lý
                     fig_time = px.bar(
-                        df_compare, x="Model", y="Processing Time (ms)", color="Model",
-                        title="Processing Speed Comparison (Lower is better)",
-                        text=df_compare["Processing Time (ms)"].round(1).astype(str) + " ms",
+                        df_compare, x=model_col, y=processing_time_col, color=model_col,
+                        title=t("testing.processing_speed"),
+                        text=df_compare[processing_time_col].round(1).astype(str) + " ms",
                         color_discrete_sequence=px.colors.qualitative.Set2
                     )
                     fig_time.update_layout(template="plotly_dark")
@@ -338,21 +352,21 @@ if uploaded_file is not None:
 
                 # Nếu có nhãn thực tế, vẽ thêm biểu đồ so sánh Accuracy và F1-Score
                 if has_label:
-                    st.markdown("#### Performance Metrics")
+                    st.markdown(f"#### {t('testing.performance_metrics')}")
                     df_metrics_melted = df_compare.melt(
-                        id_vars=["Model"], 
-                        value_vars=["Accuracy", "F1-Score"], 
-                        var_name="Metric", 
-                        value_name="Score"
+                        id_vars=[model_col], 
+                        value_vars=[accuracy_col, f1_col], 
+                        var_name=t("common.metric"), 
+                        value_name=score_col
                     )
                     
                     fig_metrics = px.bar(
-                        df_metrics_melted, x="Model", y="Score", color="Metric", barmode="group",
-                        title="Accuracy & F1-Score Comparison",
-                        text=df_metrics_melted["Score"].round(3)
+                        df_metrics_melted, x=model_col, y=score_col, color=t("common.metric"), barmode="group",
+                        title=t("testing.accuracy_f1"),
+                        text=df_metrics_melted[score_col].round(3)
                     )
                     fig_metrics.update_layout(template="plotly_dark", yaxis_range=[0, 1.1])
                     st.plotly_chart(fig_metrics, use_container_width=True)
 
 else:
-    st.info("Please upload a CSV file to start testing and comparison.")
+    st.info(t("testing.upload_prompt"))
