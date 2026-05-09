@@ -70,8 +70,8 @@ def render_card(title: str, body: str, page_path: str, action_label: str) -> Non
 row1_left, row1_right = st.columns(2)
 with row1_left:
     render_card(
-        "Fleet Overview",
-        "View fleet-wide health, sensor aggregates, and anomaly rates in one place.",
+        "Overview",
+        "View the health, sensor aggregates, and anomaly rates in one place.",
         "pages/01_Overview.py",
         "Open overview",
     )
@@ -87,7 +87,7 @@ row2_left, row2_right = st.columns(2)
 with row2_left:
     render_card(
         "Model Testing & Comparison",
-        "Upload CSV data and compare anomaly detection speed, accuracy, and results.",
+        "Upload CSV data and compare detection speed, accuracy, and results.",
         "pages/05_Model_Testing_and_Comparison.py",
         "Open model testing",
     )
