@@ -1,1 +1,23 @@
-venv_tf213/
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+*.pyd
+
+# Test and lint caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# OS files
+.DS_Store
+
+# Streamlit local secrets
+.streamlit/secrets.toml
