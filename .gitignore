@@ -15,6 +15,7 @@ htmlcov/
 venv/
 env/
 ENV/
+venv_tf213/
 
 # OS files
 .DS_Store
