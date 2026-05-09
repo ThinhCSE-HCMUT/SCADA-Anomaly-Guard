@@ -31,6 +31,52 @@ from src.data_loader import load_data
 from src.model_manager import load_model
 from src.simulation import run_simulation_step
 
+st.markdown(
+    """
+    <style>
+    .monitor-status-card {
+        background: var(--ui-surface);
+        border: 1px solid var(--ui-border);
+        border-radius: var(--ui-radius);
+        box-shadow: var(--ui-shadow);
+        padding: 0.9rem 1rem;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 0.35rem;
+    }
+
+    .monitor-status-card .title {
+        font-size: 0.86rem;
+        line-height: 1.2;
+        color: var(--ui-muted);
+        margin: 0;
+        word-break: break-word;
+    }
+
+    .monitor-status-card .value {
+        font-size: 1.08rem;
+        line-height: 1.12;
+        font-weight: 700;
+        color: var(--ui-text);
+        margin: 0;
+        word-break: break-word;
+        white-space: normal;
+    }
+
+    .monitor-status-card .delta {
+        font-size: 0.82rem;
+        line-height: 1.2;
+        color: var(--ui-good);
+        margin: 0;
+        word-break: break-word;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # ====================== SESSION STATE ======================
 def add_system_log(event_message):
     """Hàm tiện ích để ghi lại sự kiện mới vào hệ thống"""
@@ -167,12 +213,17 @@ if not current_data.empty:
     )
 
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric(
-        t("monitor.turbine_status", turbine=TURBINE_LABELS[selected_asset]),
-        f"🔴 {t('status.anomaly_caps')}" if is_anom else f"🟢 {t('status.normal_caps')}",
-        delta=f"{t('common.score')}: {score:.3f}",
-        delta_color="inverse",
-    )
+    with m1:
+        st.markdown(
+            f"""
+            <div class="monitor-status-card">
+                <p class="title">{t('monitor.turbine_status', turbine=TURBINE_LABELS[selected_asset])}</p>
+                <p class="value">{'🔴 ' if is_anom else '🟢 '}{t('status.anomaly_caps') if is_anom else t('status.normal_caps')}</p>
+                <p class="delta">{t('common.score')}: {score:.3f}</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
     m2.metric(t("common.model"), st.session_state.selected_model)
     m3.metric(t("monitor.alerts_for_turbine", turbine=TURBINE_LABELS[selected_asset]), n_mine)
     m4.metric(t("monitor.total_alerts_all"), len(st.session_state.anomaly_records))
