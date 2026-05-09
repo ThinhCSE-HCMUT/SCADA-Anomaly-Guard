@@ -1,6 +1,14 @@
 [client]
 showSidebarNavigation = false
-toolbarMode = "viewer"
+toolbarMode = "minimal"
+
+[theme]
+base = "dark"
+primaryColor = "#2dd4bf"
+backgroundColor = "#0a0f1e"
+secondaryBackgroundColor = "#111827"
+textColor = "#e5edf9"
+
 [server]
 # Luôn mở ở chế độ wide (full width)
 runOnSave = false
