@@ -20,10 +20,6 @@ def load_model(model_name: str):
             # Dùng Joblib để load Machine Learning models
             return joblib.load(path)
         
-        elif path.endswith(".onnx"):
-            # Dùng ONNX Runtime để load Deep Learning & Hybrid models
-            # Khởi tạo InferenceSession để chạy dự đoán
-            return ort.InferenceSession(path)
         else:
             st.warning(f"Unsupported model format for file: {path}")
             return None
