@@ -24,15 +24,15 @@ AVAILABLE_MODELS = {
     "Random Forest"                : "rf_model.pkl",
     "LSTM"                         : "lstm_model.keras",
     "GRU"                          : "gru_model.keras",
-    "CNN LSTM (Hybrid model)"      : "cnn_lstm_hybrid_model.keras",
-    "CNN GRU (Hybrid model)"       : "cnn_gru_hybrid_model.keras"
+    "CNN - LSTM"                   : "cnn_lstm_hybrid_model.keras",
+    "CNN - GRU"                    : "cnn_gru_hybrid_model.keras"
 }
 
 MODEL_THRESHOLDS = {
     "LSTM": 0.6500000000000001,
     "GRU": 0.6000000000000002,
-    "CNN LSTM (Hybrid model)": 0.45000000000000007,
-    "CNN GRU (Hybrid model)": 0.5500000000000002    
+    "CNN - LSTM"                   : 0.45000000000000007,
+    "CNN - GRU"                    : 0.5500000000000002    
 }
 
 # Full resolved paths — used by load_model()
@@ -41,7 +41,7 @@ MODEL_PATHS = {
     for name, filename in AVAILABLE_MODELS.items()
 }
 
-DEFAULT_MODEL     = "XGBoost"
+DEFAULT_MODEL     = "CNN - LSTM"
 ANOMALY_THRESHOLD = 0.75
 WARNING_THRESHOLD = 0.45
 
