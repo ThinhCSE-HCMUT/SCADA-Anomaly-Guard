@@ -3,7 +3,6 @@ import joblib
 import streamlit as st
 from src.config import MODEL_PATHS
 from tensorflow.keras.models import load_model as keras_load_model
-import onnxruntime as ort
 
 @st.cache_resource(show_spinner="Loading AI model, please wait...")
 def load_model(model_name: str):
