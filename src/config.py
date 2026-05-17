@@ -35,6 +35,34 @@ MODEL_THRESHOLDS = {
     "CNN - GRU"                    : 0.5500000000000002    
 }
 
+XGBOOST_FORECAST_OPTIONS = {
+    "Current": "xgb_model.pkl",
+    "12h": "xgb_model_12h.pkl",
+    "24h": "xgb_model_24h.pkl",
+    "36h": "xgb_model_36h.pkl",
+    "48h": "xgb_model_48h.pkl",
+    "72h": "xgb_model_72h.pkl",
+}
+
+XGBOOST_FORECAST_MODEL_PATHS = {
+    horizon: str(MODELS_DIR / filename)
+    for horizon, filename in XGBOOST_FORECAST_OPTIONS.items()
+}
+
+RF_FORECAST_OPTIONS = {
+    "Current": "rf_model.pkl",
+    "12h": "rf_model_12h.pkl",
+    "24h": "rf_model_24h.pkl",
+    "36h": "rf_model_36h.pkl",
+    "48h": "rf_model_48h.pkl",
+    "72h": "rf_model_72h.pkl",
+}
+
+RF_FORECAST_MODEL_PATHS = {
+    horizon: str(MODELS_DIR / filename)
+    for horizon, filename in RF_FORECAST_OPTIONS.items()
+}
+
 # Full resolved paths — used by load_model()
 MODEL_PATHS = {
     name: str(MODELS_DIR / filename)
@@ -52,46 +80,55 @@ TURBINE_LABELS  = {tid: f"WT-{tid:03d}" for tid in TARGET_TURBINES}
 # ====================== SENSOR / FEATURE COLUMNS ======================
 # Columns shown on charts (17 base sensor aggregates — before `label` column)
 CHART_SENSOR_COLS = [
-    'sensor_0_avg', 'sensor_5_avg_cos', 'sensor_5_min_cos',
-    'sensor_43_avg', 'sensor_41_avg',   'sensor_5_max_cos',
-    'sensor_5_avg_sin', 'sensor_5_min_sin', 'sensor_14_avg',
-    'sensor_52_max', 'wind_speed_3_min', 'sensor_10_avg',
-    'reactive_power_27_max', 'sensor_47', 'sensor_38_avg',
-    'sensor_40_avg', 'power_30_std',
+    'sensor_0_avg', 'sensor_5_avg_sin', 'sensor_5_avg_cos',
+    'sensor_5_min_sin', 'sensor_5_min_cos', 'sensor_5_max_cos',
+    'sensor_1_avg_sin', 'sensor_10_avg', 'sensor_14_avg',
+    'sensor_18_avg', 'sensor_19_avg', 'sensor_33_avg', 'sensor_34_avg',
+    'sensor_38_avg', 'sensor_40_avg', 'sensor_41_avg', 'sensor_42_avg_cos',
+    'sensor_44', 'reactive_power_28_min', 'reactive_power_28_max',
+    'wind_speed_3_min',
 ]
 
-# Rolling-window engineered columns (68 cols: mean/std × window 3 & 6)
+# Rolling-window engineered columns (84 cols: mean/std × window 3 & 6)
 _ROLLING_COLS = [
     # --- window = 3 ---
-    'sensor_0_avg_mean_3',    'sensor_5_avg_cos_mean_3', 'sensor_5_min_cos_mean_3',
-    'sensor_43_avg_mean_3',   'sensor_41_avg_mean_3',    'sensor_5_max_cos_mean_3',
-    'sensor_5_avg_sin_mean_3','sensor_5_min_sin_mean_3', 'sensor_14_avg_mean_3',
-    'sensor_52_max_mean_3',   'wind_speed_3_min_mean_3', 'sensor_10_avg_mean_3',
-    'reactive_power_27_max_mean_3', 'sensor_47_mean_3',  'sensor_38_avg_mean_3',
-    'sensor_40_avg_mean_3',   'power_30_std_mean_3',
-    'sensor_0_avg_std_3',     'sensor_5_avg_cos_std_3',  'sensor_5_min_cos_std_3',
-    'sensor_43_avg_std_3',    'sensor_41_avg_std_3',     'sensor_5_max_cos_std_3',
-    'sensor_5_avg_sin_std_3', 'sensor_5_min_sin_std_3',  'sensor_14_avg_std_3',
-    'sensor_52_max_std_3',    'wind_speed_3_min_std_3',  'sensor_10_avg_std_3',
-    'reactive_power_27_max_std_3', 'sensor_47_std_3',    'sensor_38_avg_std_3',
-    'sensor_40_avg_std_3',    'power_30_std_std_3',
+    'sensor_0_avg_mean_3',    'sensor_5_avg_sin_mean_3', 'sensor_5_avg_cos_mean_3',
+    'sensor_5_min_sin_mean_3', 'sensor_5_min_cos_mean_3', 'sensor_5_max_cos_mean_3',
+    'sensor_1_avg_sin_mean_3', 'sensor_10_avg_mean_3', 'sensor_14_avg_mean_3',
+    'sensor_18_avg_mean_3',   'sensor_19_avg_mean_3',   'sensor_33_avg_mean_3',
+    'sensor_34_avg_mean_3',   'sensor_38_avg_mean_3',   'sensor_40_avg_mean_3',
+    'sensor_41_avg_mean_3',   'sensor_42_avg_cos_mean_3', 'sensor_44_mean_3',
+    'reactive_power_28_min_mean_3', 'reactive_power_28_max_mean_3',
+    'wind_speed_3_min_mean_3',
+    'sensor_0_avg_std_3',     'sensor_5_avg_sin_std_3',  'sensor_5_avg_cos_std_3',
+    'sensor_5_min_sin_std_3', 'sensor_5_min_cos_std_3',  'sensor_5_max_cos_std_3',
+    'sensor_1_avg_sin_std_3', 'sensor_10_avg_std_3',     'sensor_14_avg_std_3',
+    'sensor_18_avg_std_3',   'sensor_19_avg_std_3',     'sensor_33_avg_std_3',
+    'sensor_34_avg_std_3',   'sensor_38_avg_std_3',     'sensor_40_avg_std_3',
+    'sensor_41_avg_std_3',   'sensor_42_avg_cos_std_3', 'sensor_44_std_3',
+    'reactive_power_28_min_std_3', 'reactive_power_28_max_std_3',
+    'wind_speed_3_min_std_3',
     # --- window = 6 ---
-    'sensor_0_avg_mean_6',    'sensor_5_avg_cos_mean_6', 'sensor_5_min_cos_mean_6',
-    'sensor_43_avg_mean_6',   'sensor_41_avg_mean_6',    'sensor_5_max_cos_mean_6',
-    'sensor_5_avg_sin_mean_6','sensor_5_min_sin_mean_6', 'sensor_14_avg_mean_6',
-    'sensor_52_max_mean_6',   'wind_speed_3_min_mean_6', 'sensor_10_avg_mean_6',
-    'reactive_power_27_max_mean_6', 'sensor_47_mean_6',  'sensor_38_avg_mean_6',
-    'sensor_40_avg_mean_6',   'power_30_std_mean_6',
-    'sensor_0_avg_std_6',     'sensor_5_avg_cos_std_6',  'sensor_5_min_cos_std_6',
-    'sensor_43_avg_std_6',    'sensor_41_avg_std_6',     'sensor_5_max_cos_std_6',
-    'sensor_5_avg_sin_std_6', 'sensor_5_min_sin_std_6',  'sensor_14_avg_std_6',
-    'sensor_52_max_std_6',    'wind_speed_3_min_std_6',  'sensor_10_avg_std_6',
-    'reactive_power_27_max_std_6', 'sensor_47_std_6',    'sensor_38_avg_std_6',
-    'sensor_40_avg_std_6',    'power_30_std_std_6',
+    'sensor_0_avg_mean_6',    'sensor_5_avg_sin_mean_6', 'sensor_5_avg_cos_mean_6',
+    'sensor_5_min_sin_mean_6', 'sensor_5_min_cos_mean_6', 'sensor_5_max_cos_mean_6',
+    'sensor_1_avg_sin_mean_6', 'sensor_10_avg_mean_6', 'sensor_14_avg_mean_6',
+    'sensor_18_avg_mean_6',   'sensor_19_avg_mean_6',   'sensor_33_avg_mean_6',
+    'sensor_34_avg_mean_6',   'sensor_38_avg_mean_6',   'sensor_40_avg_mean_6',
+    'sensor_41_avg_mean_6',   'sensor_42_avg_cos_mean_6', 'sensor_44_mean_6',
+    'reactive_power_28_min_mean_6', 'reactive_power_28_max_mean_6',
+    'wind_speed_3_min_mean_6',
+    'sensor_0_avg_std_6',     'sensor_5_avg_sin_std_6',  'sensor_5_avg_cos_std_6',
+    'sensor_5_min_sin_std_6', 'sensor_5_min_cos_std_6',  'sensor_5_max_cos_std_6',
+    'sensor_1_avg_sin_std_6', 'sensor_10_avg_std_6',     'sensor_14_avg_std_6',
+    'sensor_18_avg_std_6',   'sensor_19_avg_std_6',     'sensor_33_avg_std_6',
+    'sensor_34_avg_std_6',   'sensor_38_avg_std_6',     'sensor_40_avg_std_6',
+    'sensor_41_avg_std_6',   'sensor_42_avg_cos_std_6', 'sensor_44_std_6',
+    'reactive_power_28_min_std_6', 'reactive_power_28_max_std_6',
+    'wind_speed_3_min_std_6',
 ]
 
-# Full 85-feature vector fed into XGBoost / Random Forest
-FEATURE_COLS = CHART_SENSOR_COLS + _ROLLING_COLS   # 17 + 68 = 85
+# Full 105-feature vector fed into XGBoost / Random Forest
+FEATURE_COLS = CHART_SENSOR_COLS + _ROLLING_COLS   # 21 + 84 = 105
 
 # ====================== SENSOR LABELS & UNITS ======================
 SENSOR_LABELS = {
