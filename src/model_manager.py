@@ -1,7 +1,7 @@
 import os
 import joblib
 import streamlit as st
-from src.config import MODEL_PATHS
+from src.config import MODEL_PATHS, MODELS_DIR
 from tensorflow.keras.models import load_model as keras_load_model
 
 @st.cache_resource(show_spinner="Loading AI model, please wait...")
@@ -26,4 +26,18 @@ def load_model(model_name: str):
             
     except Exception as e:
         st.warning(f"Cannot load the model '{model_name}': {e}")
+        return None
+
+@st.cache_resource(show_spinner="Loading ML scaler...")
+def load_ml_scaler():
+    """Load scaler cho XGBoost & Random Forest models"""
+    scaler_path = MODELS_DIR / "Baseline" / "ML_scaler" / "scada_scaler_full.pkl"
+    if not scaler_path.exists():
+        st.warning(f"ML scaler not found at {scaler_path}")
+        return None
+    
+    try:
+        return joblib.load(str(scaler_path))
+    except Exception as e:
+        st.warning(f"Cannot load ML scaler: {e}")
         return None

@@ -22,6 +22,10 @@ from src.config import (
     get_sensor_label, get_sensor_unit, AVAILABLE_MODELS, SIMULATION_DELAY,
     TRACE_COLORS, STATUS_COLORS
 )
+from src.config import XGBOOST_FORECAST_OPTIONS, XGBOOST_FORECAST_MODEL_PATHS, RF_FORECAST_MODEL_PATHS, DL_FORECAST_MODEL_PATHS
+import os
+import joblib
+from tensorflow.keras.models import load_model as keras_load_model
 
 # 🛠️ ĐÃ SỬA: Import đúng hàm từ đúng "nhà" của nó
 from src.data_loader import load_data
@@ -88,9 +92,43 @@ with col3:
         options=list(AVAILABLE_MODELS.keys()),
         disabled=st.session_state.is_monitoring,
     )
-    active_model = load_model(model_choice)
+    # Forecast horizon selector (includes 'Current')
+    forecast_options = list(XGBOOST_FORECAST_OPTIONS.keys())
+    forecast_horizon = st.selectbox(
+        "Forecast Horizon",
+        options=forecast_options,
+        index=0,
+        disabled=st.session_state.is_monitoring,
+    )
+
+    # Load model according to selected model + horizon (fall back to generic loader)
+    active_model = None
+    try:
+        if model_choice == "XGBoost":
+            path = XGBOOST_FORECAST_MODEL_PATHS.get(forecast_horizon)
+            if path and os.path.exists(path):
+                active_model = joblib.load(path)
+        elif model_choice == "Random Forest":
+            path = RF_FORECAST_MODEL_PATHS.get(forecast_horizon)
+            if path and os.path.exists(path):
+                active_model = joblib.load(path)
+        else:
+            # Deep learning models have per-model horizon maps
+            dl_map = DL_FORECAST_MODEL_PATHS.get(model_choice)
+            if dl_map:
+                path = dl_map.get(forecast_horizon)
+                if path and os.path.exists(path):
+                    active_model = keras_load_model(path)
+
+        # Fallback to generic loader if specific horizon file not found
+        if active_model is None:
+            active_model = load_model(model_choice)
+
+    except Exception as e:
+        st.warning(f"Cannot load model for {model_choice} ({forecast_horizon}): {e}")
+
     if active_model is not None:
-        st.caption(f"Model loaded: **{model_choice}**")
+        st.caption(f"Model loaded: **{model_choice}** ({forecast_horizon})")
     else:
         st.caption("⚠️ File chưa có — fallback **ground-truth label**")
 

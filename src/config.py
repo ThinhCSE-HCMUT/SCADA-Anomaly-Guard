@@ -362,7 +362,7 @@ CHART_CONFIG = {
 }
 
 # ====================== SIMULATION SETTINGS ======================
-SIMULATION_DELAY       = 3.0    # seconds between auto-rerun steps
+SIMULATION_DELAY       = 1.0    # seconds between auto-rerun steps
 SIMULATION_BATCH_SIZE  = 10     # rows per step per turbine
 SIMULATION_MAX_HISTORY = 150    # max data points kept per turbine in live view
 

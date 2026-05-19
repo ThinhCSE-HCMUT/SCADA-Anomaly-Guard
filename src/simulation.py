@@ -1,24 +1,55 @@
+import os
+import joblib
 import pandas as pd
 import streamlit as st
+from pathlib import Path
 
 from src.config import (
-    TARGET_TURBINES, TURBINE_LABELS, 
+    TARGET_TURBINES, TURBINE_LABELS, MODELS_DIR,
     SIMULATION_BATCH_SIZE, SIMULATION_MAX_HISTORY
 )
-# Đã tách các hàm ra, giờ chỉ cần import vào để dùng
 from src.data_loader import load_data, split_by_turbine
-from src.model_manager import load_model
+from src.model_manager import load_model, load_ml_scaler
 from src.inference import predict_batch
 
-# ====================== CORE ENGINE ======================
+# --- HÀM BỔ TRỢ: CACHE DEEP LEARNING SCALER THEO TỪNG ASSET TRÁNH ĐỌC FILE LIÊN TỤC ---
+@st.cache_resource
+def load_dl_scaler_by_asset(turbine_id: int):
+    """
+    Tự động nạp scaler tương ứng với từng asset_id từ thư mục models/DeepLearning/DL_scaler
+    """
+    scaler_file_name = f"asset_{turbine_id}.pkl"
+    # Định nghĩa đường dẫn chuẩn dựa vào MODELS_DIR từ config
+    scaler_path = MODELS_DIR / "DeepLearning" / "DL_scaler" / scaler_file_name
+    
+    if scaler_path.exists():
+        try:
+            return joblib.load(scaler_path)
+        except Exception as e:
+            print(f"Error loading DL scaler for asset {turbine_id}: {e}")
+            return None
+    else:
+        print(f"Warning: DL scaler not found at {scaler_path}")
+        return None
+
+# ====================== CORE SIMULATION ENGINE ======================
 def run_simulation_step():
-    """Hàm chạy 1 nhịp mô phỏng, dùng chung cho mọi trang."""
+    """Hàm chạy 1 nhịp mô phỏng, hỗ trợ đồng thời ML Flow và DL Flow."""
     raw_df = load_data()
     if raw_df.empty:
         return "NO_DATA"
 
     turbine_dfs = split_by_turbine(raw_df)
-    running_model = load_model(st.session_state.selected_model)
+    current_model_name = st.session_state.selected_model
+    running_model = load_model(current_model_name)
+    
+    # Xác định loại luồng mô hình toàn cục
+    is_ml_flow = current_model_name in ["XGBoost", "Random Forest"]
+    
+    # Nếu là ML Flow, dùng chung 1 scaler cho toàn bộ tuabin
+    global_ml_scaler = None
+    if is_ml_flow:
+        global_ml_scaler = load_ml_scaler()
     
     new_rows = []
     any_active = False
@@ -36,11 +67,19 @@ def run_simulation_step():
             st.session_state.stream_done[tid] = True
             continue
 
-        # Predict từ file inference
-        pred_labels, pred_probas = predict_batch(running_model, batch)
+        # ✨ ĐÃ THÊM: Quyết định chọn bộ Scaler phù hợp cho lượt dự đoán này
+        if is_ml_flow:
+            current_scaler = global_ml_scaler
+        else:
+            # Nếu không phải ML (tức là thuộc nhóm LSTM, GRU, Hybrid...), nạp scaler động theo Asset ID
+            current_scaler = load_dl_scaler_by_asset(tid)
+
+        # Predict từ file inference (Luồng xử lý hình dáng shape 2D/3D đã được tự động hóa tại đây)
+        pred_labels, pred_probas = predict_batch(running_model, batch, current_scaler)
+        
         batch['pred_label'] = pred_labels
         batch['anomaly_score'] = pred_probas
-        batch['model_used'] = st.session_state.selected_model
+        batch['model_used'] = current_model_name
 
         new_rows.append(batch)
         any_active = True
