@@ -13,35 +13,63 @@ MODELS_DIR       = ROOT_DIR / "models"
 ASSETS_DIR       = ROOT_DIR / "assets"
 
 # Data files
-# debug_dashboard_after_patch.csv: 88 cols (17 base + 68 rolling + label + meta)
-REALTIME_DATA_PATH = DATA_DIR / "debug_dashboard_after_patch.csv"
+# df_simulation.csv: 88 cols (17 base + 68 rolling + label + meta)
+REALTIME_DATA_PATH = DATA_DIR / "df_simulation.csv"
 TEST_DATA_PATH     = DATA_DIR / "test_data.csv"
 SAMPLE_DATA_PATH   = DATA_DIR / "sample_data.csv"
 
 # ====================== MODEL CONFIGURATION ======================
 AVAILABLE_MODELS = {
-    "XGBoost"                      : "xgb_model.pkl",
-    "Random Forest"                : "rf_model.pkl",
-    "LSTM"                         : "lstm_model.keras",
-    "GRU"                          : "gru_model.keras",
-    "CNN - LSTM"                   : "cnn_lstm_hybrid_model.keras",
-    "CNN - GRU"                    : "cnn_gru_hybrid_model.keras"
+    "XGBoost"                      : "Baseline/XGBoost/xgb_model.pkl",
+    "Random Forest"                : "Baseline/RandomForest/rf_model.pkl",
+    "LSTM"                         : "DeepLearning/LSTM/lstm_model.keras",
+    "GRU"                          : "DeepLearning/GRU/gru_model.keras",
+    "CNN - LSTM"                   : "DeepLearning/CNN_LSTM/cnn_lstm_hybrid_model.keras",
+    "CNN - GRU"                    : "DeepLearning/CNN_GRU/cnn_gru_hybrid_model.keras"
 }
 
 MODEL_THRESHOLDS = {
-    "LSTM": 0.6500000000000001,
-    "GRU": 0.6000000000000002,
-    "CNN - LSTM"                   : 0.45000000000000007,
-    "CNN - GRU"                    : 0.5500000000000002    
+    "LSTM": {
+        "Current": 0.418,
+        "12h": 0.384,
+        "24h": 0.423,
+        "36h": 0.459,
+        "48h": 0.354,
+        "72h": 0.403
+    },
+    "GRU": {
+        "Current": 0.495,
+        "12h": 0.382,
+        "24h": 0.166,
+        "36h": 0.321,
+        "48h": 0.528,
+        "72h": 0.391
+    },
+    "CNN - LSTM": {
+        "Current": 0.245,
+        "12h": 0.27,
+        "24h": 0.445,
+        "36h": 0.668,
+        "48h": 0.192,
+        "72h": 0.402
+    },
+    "CNN - GRU": {
+        "Current": 0.333,
+        "12h": 0.357,
+        "24h": 0.364,
+        "36h": 0.545,
+        "48h": 0.22,
+        "72h": 0.365
+    }
 }
 
 XGBOOST_FORECAST_OPTIONS = {
-    "Current": "xgb_model.pkl",
-    "12h": "xgb_model_12h.pkl",
-    "24h": "xgb_model_24h.pkl",
-    "36h": "xgb_model_36h.pkl",
-    "48h": "xgb_model_48h.pkl",
-    "72h": "xgb_model_72h.pkl",
+    "Current": "Baseline/XGBoost/xgb_model.pkl",
+    "12h": "Baseline/XGBoost/xgb_model_12h.pkl",
+    "24h": "Baseline/XGBoost/xgb_model_24h.pkl",
+    "36h": "Baseline/XGBoost/xgb_model_36h.pkl",
+    "48h": "Baseline/XGBoost/xgb_model_48h.pkl",
+    "72h": "Baseline/XGBoost/xgb_model_72h.pkl",
 }
 
 XGBOOST_FORECAST_MODEL_PATHS = {
@@ -50,17 +78,60 @@ XGBOOST_FORECAST_MODEL_PATHS = {
 }
 
 RF_FORECAST_OPTIONS = {
-    "Current": "rf_model.pkl",
-    "12h": "rf_model_12h.pkl",
-    "24h": "rf_model_24h.pkl",
-    "36h": "rf_model_36h.pkl",
-    "48h": "rf_model_48h.pkl",
-    "72h": "rf_model_72h.pkl",
+    "Current": "Baseline/RandomForest/rf_model.pkl",
+    "12h": "Baseline/RandomForest/rf_model_12h.pkl",
+    "24h": "Baseline/RandomForest/rf_model_24h.pkl",
+    "36h": "Baseline/RandomForest/rf_model_36h.pkl",
+    "48h": "Baseline/RandomForest/rf_model_48h.pkl",
+    "72h": "Baseline/RandomForest/rf_model_72h.pkl",
 }
 
 RF_FORECAST_MODEL_PATHS = {
     horizon: str(MODELS_DIR / filename)
     for horizon, filename in RF_FORECAST_OPTIONS.items()
+}
+
+DL_FORECAST_OPTIONS = {
+    "LSTM": {
+        "Current": "DeepLearning/LSTM/lstm_model.keras",
+        "12h": "DeepLearning/LSTM/lstm_model_12h.keras",
+        "24h": "DeepLearning/LSTM/lstm_model_24h.keras",
+        "36h": "DeepLearning/LSTM/lstm_model_36h.keras",
+        "48h": "DeepLearning/LSTM/lstm_model_48h.keras",
+        "72h": "DeepLearning/LSTM/lstm_model_72h.keras",
+    },
+    "GRU": {
+        "Current": "DeepLearning/GRU/gru_model.keras",
+        "12h": "DeepLearning/GRU/gru_model_12h.keras",
+        "24h": "DeepLearning/GRU/gru_model_24h.keras",
+        "36h": "DeepLearning/GRU/gru_model_36h.keras",
+        "48h": "DeepLearning/GRU/gru_model_48h.keras",
+        "72h": "DeepLearning/GRU/gru_model_72h.keras",
+    },
+    "CNN - LSTM": {
+        "Current": "DeepLearning/CNN_LSTM/cnn_lstm_hybrid_model.keras",
+        "12h": "DeepLearning/CNN_LSTM/cnn_lstm_hybrid_model_12h.keras",
+        "24h": "DeepLearning/CNN_LSTM/cnn_lstm_hybrid_model_24h.keras",
+        "36h": "DeepLearning/CNN_LSTM/cnn_lstm_hybrid_model_36h.keras",
+        "48h": "DeepLearning/CNN_LSTM/cnn_lstm_hybrid_model_48h.keras",
+        "72h": "DeepLearning/CNN_LSTM/cnn_lstm_hybrid_model_72h.keras",
+    },
+    "CNN - GRU": {
+        "Current": "DeepLearning/CNN_GRU/cnn_gru_hybrid_model.keras",
+        "12h": "DeepLearning/CNN_GRU/cnn_gru_hybrid_model_12h.keras",
+        "24h": "DeepLearning/CNN_GRU/cnn_gru_hybrid_model_24h.keras",
+        "36h": "DeepLearning/CNN_GRU/cnn_gru_hybrid_model_36h.keras",
+        "48h": "DeepLearning/CNN_GRU/cnn_gru_hybrid_model_48h.keras",
+        "72h": "DeepLearning/CNN_GRU/cnn_gru_hybrid_model_72h.keras",
+    },
+}
+
+DL_FORECAST_MODEL_PATHS = {
+    model_name: {
+        horizon: str(MODELS_DIR / filename)
+        for horizon, filename in horizon_map.items()
+    }
+    for model_name, horizon_map in DL_FORECAST_OPTIONS.items()
 }
 
 # Full resolved paths — used by load_model()
