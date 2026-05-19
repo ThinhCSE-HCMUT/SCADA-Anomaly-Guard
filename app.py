@@ -42,7 +42,7 @@ st.subheader("System Snapshot")
 kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 
 with kpi1:
-    st.metric(label="Active Turbines", value=f"{fleet_size} / {fleet_size}", delta="Fleet ready")
+    st.metric(label="Active Turbines", value=f"{fleet_size} / {fleet_size}", delta="Ready")
 with kpi2:
     st.metric(
         label="Monitoring",

@@ -13,12 +13,12 @@ import plotly.express as px
 from xgboost import XGBClassifier
 from src.model_manager import load_model
 import os
-
-os.environ["TF_USE_LEGACY_KERAS"] = "1"
+import json
+from pathlib import Path
 
 from src.sidebar import render_sidebar
-from src.config import AVAILABLE_MODELS, DEFAULT_TABLE_ROWS, MODEL_THRESHOLDS
-
+from src.config import AVAILABLE_MODELS, CHART_SENSOR_COLS, DEFAULT_TABLE_ROWS, MODEL_THRESHOLDS, XGBOOST_FORECAST_OPTIONS, XGBOOST_FORECAST_MODEL_PATHS, RF_FORECAST_OPTIONS, RF_FORECAST_MODEL_PATHS, DL_FORECAST_MODEL_PATHS, FEATURE_COLS
+from tensorflow.keras.models import load_model as keras_load_model
 st.set_page_config(
     page_title="Model Testing and Comparison", 
     layout="wide",                 
@@ -31,9 +31,6 @@ def load_buffer():
 
 def load_backend_artifacts():
     try:
-        # 1. Load Scaler
-        scaler = joblib.load("models/scada_scaler_full.pkl")
-        
         # 2. Load TẤT CẢ Models tự động thông qua model_manager
         loaded_models = {}
         
@@ -48,13 +45,62 @@ def load_backend_artifacts():
             else:
                 st.warning(f"Không thể nạp được model: {model_name}. Vui lòng kiểm tra lại file.")
                 
+        # Load các phiên bản XGBoost theo từng horizon dự báo sớm
+        xgb_forecast_models = {}
+        for horizon, path in XGBOOST_FORECAST_MODEL_PATHS.items():
+            if os.path.exists(path):
+                try:
+                    xgb_forecast_models[horizon] = joblib.load(path)
+                except Exception as e:
+                    st.warning(f"Không thể nạp XGBoost {horizon} từ '{path}': {e}")
+            else:
+                st.warning(f"Không tìm thấy file XGBoost {horizon}: {path}")
+
+        if xgb_forecast_models:
+            if "XGBoost" in loaded_models and not isinstance(loaded_models["XGBoost"], dict):
+                xgb_forecast_models.setdefault("Current", loaded_models["XGBoost"])
+            loaded_models["XGBoost"] = xgb_forecast_models
+
+        # Load các phiên bản Random Forest theo từng horizon dự báo sớm
+        rf_forecast_models = {}
+        for horizon, path in RF_FORECAST_MODEL_PATHS.items():
+            if os.path.exists(path):
+                try:
+                    rf_forecast_models[horizon] = joblib.load(path)
+                except Exception as e:
+                    st.warning(f"Không thể nạp Random Forest {horizon} từ '{path}': {e}")
+            else:
+                st.warning(f"Không tìm thấy file Random Forest {horizon}: {path}")
+
+        if rf_forecast_models:
+            if "Random Forest" in loaded_models and not isinstance(loaded_models["Random Forest"], dict):
+                rf_forecast_models.setdefault("Current", loaded_models["Random Forest"])
+            loaded_models["Random Forest"] = rf_forecast_models
+
+        # Load các phiên bản Deep Learning theo từng horizon dự báo sớm
+        for model_name, horizon_paths in DL_FORECAST_MODEL_PATHS.items():
+            dl_models = {}
+            for horizon, path in horizon_paths.items():
+                if os.path.exists(path):
+                    try:
+                        dl_models[horizon] = keras_load_model(path)
+                    except Exception as e:
+                        st.warning(f"Không thể nạp {model_name} {horizon} từ '{path}': {e}")
+                else:
+                    st.warning(f"Không tìm thấy file {model_name} {horizon}: {path}")
+            if dl_models:
+                if model_name in loaded_models and not isinstance(loaded_models[model_name], dict):
+                    dl_models.setdefault("Current", loaded_models[model_name])
+                loaded_models[model_name] = dl_models
+        
         # (Riêng XGBoost nếu bạn bắt buộc dùng file .json thay vì .pkl thì nạp thủ công ở đây)
-        if "XGBoost" not in loaded_models and os.path.exists("models/xgb_model.json"):
+        xgb_json_path = "models/Baseline/XGBoost/xgb_model.json"
+        if "XGBoost" not in loaded_models and os.path.exists(xgb_json_path):
             xgb_model = XGBClassifier()
-            xgb_model.load_model("models/xgb_model.json")
+            xgb_model.load_model(xgb_json_path)
             loaded_models["XGBoost"] = xgb_model
         
-        return scaler, loaded_models
+        return None, loaded_models
         
     except Exception as e:
         st.error(f"Lỗi khi load models: {e}")
@@ -108,7 +154,58 @@ def apply_rolling_window(df_raw, windows=[3, 6]):
 
     return df_out
 
-scaler, loaded_models = load_backend_artifacts()
+def shift_labels_for_forecast(df, forecast_horizon_hours: str):
+    """
+    Shift nhãn (label) theo horizon dự báo sớm.
+    Ví dụ: horizon='12h' → shift nhãn 12h về trước (72 steps with rows_per_hour=6)
+    """
+    if forecast_horizon_hours == "Current" or 'label' not in df.columns:
+        return df
+    
+    df_shifted = df.copy()
+    
+    try:
+        hours = int(forecast_horizon_hours.replace('h', ''))
+    except ValueError:
+        st.warning(f"Không thể parse horizon '{forecast_horizon_hours}'. Sử dụng nhãn hiện tại.")
+        return df_shifted
+    
+    if hours == 0:
+        return df_shifted
+    
+    rows_per_hour = 6
+    shift_steps = hours * rows_per_hour
+    
+    if 'asset_id' in df_shifted.columns:
+        df_shifted['label'] = df_shifted.groupby('asset_id')['label'].shift(-shift_steps)
+    else:
+        df_shifted['label'] = df_shifted['label'].shift(-shift_steps)
+    
+    initial_len = len(df_shifted)
+    df_shifted = df_shifted.dropna(subset=['label']).reset_index(drop=True)
+    
+    return df_shifted
+
+
+def validate_uploaded_csv(df):
+    required_cols = ["time_stamp", "asset_id"]
+    missing_required = [col for col in required_cols if col not in df.columns]
+    if missing_required:
+        return False, (
+            "Uploaded CSV must contain the following columns: `time_stamp`, `asset_id`. "
+            f"Missing columns: {', '.join(missing_required)}."
+        )
+
+    missing_features = [col for col in CHART_SENSOR_COLS if col not in df.columns]
+    if missing_features:
+        return False, (
+            "Uploaded CSV does not match the expected model input format. "
+            "Please upload a CSV with all required feature columns used during model training. "
+            f"Missing columns: {', '.join(missing_features[:10])}{'...' if len(missing_features) > 10 else ''}"
+        )
+
+    return True, None
+
 df_buffer = load_buffer()
 
 # ====================== GIAO DIỆN CHÍNH ======================
@@ -124,9 +221,18 @@ with col1:
         "Upload SCADA Data (CSV)",
         type=["csv"],
     )
+    st.info(
+        "Please upload a CSV file with the same feature names used by the trained models. "
+        "Required columns include `time_stamp`, `asset_id`, and the model feature columns."
+    )
+    with st.expander("CSV format guidance", expanded=False):
+        st.markdown(
+            "- Required metadata columns: `time_stamp`, `asset_id`.\n"
+            "- Required feature columns: same names used during training, for example `sensor_0_avg`, `sensor_5_avg_sin`, `sensor_5_avg_cos`, ...\n"
+            "- Use `data/sample_data.csv` as a reference template if available."
+        )
 
 with col2:
-    # Lấy danh sách model từ config, nếu chưa có XGBoost thì tự động thêm vào để test
     model_options = list(AVAILABLE_MODELS.keys())
         
     selected_models = st.multiselect(
@@ -134,27 +240,33 @@ with col2:
         options=model_options,
     )
 
+    forecast_horizon = st.selectbox(
+        "Forecast Horizon",
+        options=list(XGBOOST_FORECAST_OPTIONS.keys()),
+        index=0,
+        help="Chọn Current hoặc dự báo sớm. Áp dụng cho XGBoost và Random Forest."
+    )
+
 # ====================== PROCESS DATA ======================
 if uploaded_file is not None:
-    
-    # 1. Đọc dữ liệu
     df = pd.read_csv(uploaded_file)
     
-    # Ép kiểu datetime để sort không bị sai
     if 'time_stamp' in df.columns:
         df['time_stamp'] = pd.to_datetime(df['time_stamp'])
         
-    # Sắp xếp toàn bộ df ngay từ đầu
+    valid_format, validation_message = validate_uploaded_csv(df)
+    if not valid_format:
+        st.error(validation_message)
+        st.stop()
+
     if 'asset_id' in df.columns and 'time_stamp' in df.columns:
         df = df.sort_values(by=['asset_id', 'time_stamp']).reset_index(drop=True)
-    # -------------------------------------------------------------
-        
+    
     st.success(f"Loaded {len(df)} records from uploaded file")
 
     st.subheader("Data Preview")
     st.dataframe(df.head(DEFAULT_TABLE_ROWS), use_container_width=True)
 
-    # Nút chạy dự đoán canh giữa
     col_left, col_mid, col_right = st.columns([1, 0.5, 1])
     with col_mid:
         run_button = st.button("Run Prediction", type="primary", use_container_width=True)
@@ -164,162 +276,52 @@ if uploaded_file is not None:
             st.warning("Please select at least one model!")
             st.stop()
 
-        with st.spinner("Running inference on selected models..."):
-            
-            has_label = 'label' in df.columns
-            y_true = df['label'] if has_label else None
-            
-            cols_to_drop = ['time_stamp', 'asset_id', 'label', 'train_test', 'status_type_id', 'sequence_id']
-            
-            scaler_ml = joblib.load("models/scada_scaler_full.pkl") 
+        with st.spinner("Loading stored model performance..."):
+            perf_path = Path("models") / "model_performance.json"
+            if perf_path.exists():
+                try:
+                    model_perf = json.loads(perf_path.read_text())
+                except Exception as e:
+                    st.error(f"Cannot read performance file: {e}")
+                    model_perf = {}
+            else:
+                st.warning("No saved performance file found at models/model_performance.json")
+                model_perf = {}
 
             results = []
-            predictions_dict = {}
-            raw_metrics_for_plot = [] # Danh sách lưu dữ liệu thô để vẽ biểu đồ so sánh
+            raw_metrics_for_plot = []
 
             for model_name in selected_models:
-                start_time = time.time()
-                
-                if model_name in ["XGBoost", "Random Forest"]:
-                    if 'asset_id' in df.columns and 'asset_id' not in df_buffer.columns:
-                        df_buffer['asset_id'] = df['asset_id'].iloc[0]
-                    if 'time_stamp' in df.columns and 'time_stamp' not in df_buffer.columns:
-                        start_time_upload = df['time_stamp'].min()
-                        df_buffer['time_stamp'] = [start_time_upload - pd.Timedelta(minutes=i) for i in range(6, 0, -1)]
+                display_model_name = model_name
+                if model_name in ["XGBoost", "Random Forest", "LSTM", "GRU", "CNN - LSTM", "CNN - GRU"]:
+                    display_model_name = f"{model_name} ({forecast_horizon})"
 
-                    common_cols = [c for c in df.columns if c in df_buffer.columns]
-                    df_buffer_clean = df_buffer[common_cols].copy()
-                    
-                    df_buffer_clean['is_buffer'] = True
-                    df_upload_temp = df.copy()
-                    df_upload_temp['is_buffer'] = False
+                perf_entry = model_perf.get(model_name, {}).get(forecast_horizon, {}) if model_perf else {}
 
-                    df_combined = pd.concat([df_buffer_clean, df_upload_temp], ignore_index=True)
-                    df_combined = df_combined.sort_values(by=['asset_id', 'time_stamp']).reset_index(drop=True)
+                def fmt(x):
+                    return f"{x:.2f}" if isinstance(x, (int, float)) else (str(x) if x is not None and x != "" else "N/A")
 
-                    df_rolled_full = apply_rolling_window(df_combined, windows=[3, 6])
-
-                    df_rolled = df_rolled_full[df_rolled_full['is_buffer'] == False].copy()
-                    df_rolled = df_rolled.drop(columns=['is_buffer']).reset_index(drop=True)
-                        
-                    has_label = 'label' in df_rolled.columns
-                    y_true = df_rolled['label'] if has_label else None
-                    
-                    X_ml_raw = df_rolled.drop(columns=[c for c in cols_to_drop if c in df_rolled.columns])
-                    
-                    if hasattr(scaler_ml, 'feature_names_in_'):
-                        X_ml_raw = X_ml_raw[scaler_ml.feature_names_in_]
-                    
-                    # Scale
-                    X_scaled_array = scaler_ml.transform(X_ml_raw)
-                    X_scaled = pd.DataFrame(X_scaled_array, columns=X_ml_raw.columns)
-                    
-                    # Predict
-                    model = loaded_models.get(model_name)
-                    if model is not None:
-                        y_pred_class = model.predict(X_scaled)
-                    else:
-                        y_pred_class = np.zeros(len(df_rolled))
-                        
-                else:
-                    # DL Logic
-                    SEQ_LENGTH = 144
-                    
-                    cols_to_exclude = ['asset_id', 'time_stamp', 'label']
-                    base_features = [c for c in df.columns if c not in cols_to_exclude]
-                    
-                    df_dl_raw = df.copy()
-                    
-                    X_dl_raw = df_dl_raw[base_features]
-
-                    current_asset = df['asset_id'].iloc[0] if 'asset_id' in df.columns else None
-                    
-                    if current_asset is not None:
-                        if isinstance(current_asset, str) and 'asset_' in current_asset:
-                            asset_num = current_asset.replace('asset_', '')
-                        else:
-                            asset_num = int(current_asset)
-                            
-                        scaler_path = f"models/asset_{asset_num}.pkl"
-                        
-                        try:
-                            scaler_dl = joblib.load(scaler_path)
-                            if hasattr(scaler_dl, 'feature_names_in_'):
-                                X_dl_raw = X_dl_raw[scaler_dl.feature_names_in_]
-                                
-                            X_scaled_array = scaler_dl.transform(X_dl_raw)
-                        except FileNotFoundError:
-                            st.error(f"Không tìm thấy Scaler cho turbine {asset_num} tại đường dẫn: '{scaler_path}'. Vui lòng kiểm tra lại!")
-                            st.stop()
-                    else:
-                        st.error("Dữ liệu không có cột 'asset_id' để xác định turbine. Vui lòng kiểm tra lại CSV.")
-                        st.stop()
-                    
-                    
-                    if len(X_scaled_array) < SEQ_LENGTH:
-                        st.warning(f"Dữ liệu tải lên quá ngắn. Cần ít nhất {SEQ_LENGTH} dòng để chạy Deep Learning.")
-                        y_pred_class = np.zeros(len(df_dl_raw))
-                    else:
-                        # (samples, time_steps, features)
-                        X_seq = []
-                        for i in range(len(X_scaled_array) - SEQ_LENGTH + 1):
-                            X_seq.append(X_scaled_array[i : i + SEQ_LENGTH])
-                        X_seq = np.array(X_seq)
-                        
-                        # Predict
-                        model = loaded_models.get(model_name)
-
-                        if model is not None:
-                            y_pred_prob = model.predict(X_seq, verbose=0)
-                            current_threshold = MODEL_THRESHOLDS.get(model_name, 0.5)
-                            y_pred_class_seq = (y_pred_prob >= current_threshold).astype(int).flatten()
-
-                            pad_length = SEQ_LENGTH - 1
-                            y_pred_class = np.pad(y_pred_class_seq, (pad_length, 0), 'constant', constant_values=0)
-
-                        else:
-                            print(f"Model {model_name} not found in loaded_models. Skipping prediction.")
-                            y_pred_class = np.zeros(len(df_dl_raw))
-                            
-                    # Update y_true
-                    has_label = 'label' in df_dl_raw.columns
-                    y_true = df_dl_raw['label'] if has_label else None
-                
-                process_time = (time.time() - start_time)
-                predictions_dict[model_name] = y_pred_class
-
-                anomaly_count = sum(y_pred_class)
-                anomaly_rate = anomaly_count / len(y_pred_class)
-
-                # Lưu vào bảng hiển thị
                 model_result = {
-                    "Model": model_name,
-                    "Processing Time (s)": f"{process_time:.1f}",
-                    "Detected Anomalies": f"{anomaly_count} ({anomaly_rate*100:.1f}%)"
+                    "Model": display_model_name,
+                    "Accuracy": fmt(perf_entry.get("accuracy")),
+                    "F1-Score": fmt(perf_entry.get("f1")),
+                    "Precision": fmt(perf_entry.get("precision")),
+                    "Recall": fmt(perf_entry.get("recall")),
+                    "PR-AUC": fmt(perf_entry.get("pr_auc")),
+                    "ROC-AUC": fmt(perf_entry.get("roc_auc")),
                 }
-                
-                # Lưu vào list raw để vẽ biểu đồ
-                plot_data = {
-                    "Model": model_name,
-                    "Processing Time (s)": process_time,
-                    "Anomalies Found": anomaly_count
-                }
-
-                if has_label and y_true is not None:
-                    acc = accuracy_score(y_true, y_pred_class)
-                    f1 = f1_score(y_true, y_pred_class, zero_division=0)
-                    model_result["Accuracy"] = f"{acc:.3f}"
-                    model_result["F1-Score"] = f"{f1:.3f}"
-                    model_result["Precision"] = f"{precision_score(y_true, y_pred_class, zero_division=0):.3f}"
-                    model_result["Recall"] = f"{recall_score(y_true, y_pred_class, zero_division=0):.3f}"
-                    
-                    plot_data["Accuracy"] = acc
-                    plot_data["F1-Score"] = f1
-                else:
-                    model_result["F1-Score"] = "N/A"
-
                 results.append(model_result)
-                raw_metrics_for_plot.append(plot_data)
+                
+                # ✨ ĐOẠN SỬA ĐỔI: Đẩy đầy đủ cả 6 metrics thực tế vào danh sách để vẽ chart tổng hợp
+                raw_metrics_for_plot.append({
+                    "Model": display_model_name,
+                    "Accuracy": perf_entry.get("accuracy", 0.0),
+                    "F1-Score": perf_entry.get("f1", 0.0),
+                    "Precision": perf_entry.get("precision", 0.0),
+                    "Recall": perf_entry.get("recall", 0.0),
+                    "PR-AUC": perf_entry.get("pr_auc", 0.0),
+                    "ROC-AUC": perf_entry.get("roc_auc", 0.0)
+                })
 
             st.success("Prediction completed!")
             st.toast("Model prediction completed successfully!", icon="✅")
@@ -331,89 +333,194 @@ if uploaded_file is not None:
 
             # --- BIỂU ĐỒ CHI TIẾT TỪNG MODEL ---
             st.subheader("Detailed Prediction Dashboard")
-            for model_name in selected_models:
-                with st.expander(f"Detailed Results: {model_name}", expanded=True): # Đổi thành False cho gọn gàng khi có nhiều model
-                    y_pred_m = predictions_dict[model_name]
-                    
-                    c1, c2 = st.columns([1, 3])
-                    with c1:
-                        st.metric("Total Samples", len(df))
-                        st.metric("Anomalies Found", sum(y_pred_m))
-                        if has_label:
-                            st.metric("Real Anomalies", sum(y_true))
-                            
-                    with c2:
-                        anomaly_count = sum(y_pred_m)
-                        normal_count = len(y_pred_m) - anomaly_count
-                        
-                        pie_data = pd.DataFrame({
-                            "Status": ["Normal Predicted (0)", "Anomaly Predicted (1)"],
-                            "Count": [normal_count, anomaly_count]
-                        })
-                        
-                        fig = px.pie(
-                            pie_data, 
-                            names="Status", 
-                            values="Count", 
-                            title=f"Prediction Distribution - {model_name}",
-                            color="Status",
-                            color_discrete_map={
-                                "Normal Predicted (0)": "#22c55e",  
-                                "Anomaly Predicted (1)": "#ef4444"  
-                            },
-                            hole=0.45 
-                        )
-                        fig.update_traces(textposition='inside', textinfo='percent+label')
-                        fig.update_layout(template="plotly_dark", margin=dict(t=50, b=20, l=20, r=20))
-                        st.plotly_chart(fig, use_container_width=True)
+            
+            # Định nghĩa bảng màu đồng bộ toàn cục (Precision dùng màu vàng chanh #FFFF08)
+            metrics_list = ["Accuracy", "F1-Score", "Precision", "Recall", "PR-AUC", "ROC-AUC"]
+            metric_colors = {
+                "Accuracy": "#10b981",    # Xanh Emerald rực rỡ
+                "F1-Score": "#0ea5e9",    # Xanh Ocean thanh lịch
+                "Precision": "#CFCC4E",   # ✨ Cập nhật màu Vàng Chanh chuẩn rực rỡ
+                "Recall": "#636efa",      # Tím Indigo hoàng gia
+                "PR-AUC": "#a855f7",      # Tím Purple huyền bí
+                "ROC-AUC": "#ec4899"      # Hồng Neon đậm chất dữ liệu
+            }
 
+            for model_name in selected_models:
+                display_model_name = model_name
+                label_shifted = False
+                if model_name in ["XGBoost", "Random Forest", "LSTM", "GRU", "CNN - LSTM", "CNN - GRU"]:
+                    display_model_name = f"{model_name} ({forecast_horizon})"
+                    label_shifted = (forecast_horizon != "Current")
+
+                with st.expander(f"Detailed Results: {display_model_name}", expanded=True):
+                    model_row = next((r for r in results if r["Model"] == display_model_name), None)
+                    c1, c2 = st.columns([1.2, 2.8])
+                    
+                    def to_float(v):
+                        try:
+                            if v is None or str(v).strip().upper() in ["N/A", "NONE", "NULL"]:
+                                return None
+                            return float(v)
+                        except Exception:
+                            return None
+
+                    with c1:
+                        total_samples = len(df) if 'df' in locals() else "N/A"
+                        if isinstance(total_samples, int):
+                            total_samples_str = f"{total_samples:,}"
+                        else:
+                            total_samples_str = str(total_samples)
+
+                        st.markdown(f"""
+                            <div style="background-color: #1e293b; border-radius: 6px; padding: 6px 12px; margin-bottom: 8px; border-left: 4px solid #94a3b8;">
+                                <div style="font-size: 11px; color: #94a3b8; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">Total Samples</div>
+                                <div style="font-size: 18px; color: #f8fafc; font-weight: 700; line-height: 1.2;">{total_samples_str}</div>
+                            </div>
+                        """, unsafe_allow_html=True)
+                        
+                        if model_row is not None:
+                            for metric in metrics_list:
+                                raw_val = model_row.get(metric, "N/A")
+                                val_float = to_float(raw_val)
+                                color = metric_colors.get(metric, "#636efa")
+                                
+                                if val_float is not None:
+                                    pct = max(0.0, min(100.0, val_float * 100))
+                                    val_str = f"{val_float:.3f}"
+                                else:
+                                    pct = 0
+                                    val_str = "N/A"
+                                
+                                st.markdown(f"""
+                                    <div style="background-color: #1e293b; border-radius: 6px; padding: 6px 12px; margin-bottom: 7px; border-left: 4px solid {color}; position: relative;">
+                                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                                            <span style="font-size: 12px; color: #cbd5e1; font-weight: 500;">{metric}</span>
+                                            <span style="font-size: 14px; color: #ffffff; font-weight: 700;">{val_str}</span>
+                                        </div>
+                                        <div style="background-color: #334155; border-radius: 2px; height: 4px; width: 100%; margin-top: 5px; overflow: hidden;">
+                                            <div style="background-color: {color}; height: 100%; width: {pct}%; border-radius: 2px; transition: width 0.6s ease-in-out;"></div>
+                                        </div>
+                                    </div>
+                                """, unsafe_allow_html=True)
+                        else:
+                            st.info("No saved performance for this model/horizon.")
+
+                    with c2:
+                        if model_row is not None:
+                            chart_data = []
+                            for metric in metrics_list:
+                                val = to_float(model_row.get(metric, None))
+                                chart_data.append({
+                                    "Metric": metric,
+                                    "Value": val if val is not None else 0.0,
+                                    "Label": f"{val:.3f}" if val is not None else "N/A"
+                                })
+                            
+                            chart_df = pd.DataFrame(chart_data)
+
+                            fig = px.bar(
+                                chart_df,
+                                x="Value",
+                                y="Metric",
+                                orientation='h',
+                                text="Label",
+                                color="Metric",
+                                color_discrete_map=metric_colors
+                            )
+                            
+                            fig.update_layout(
+                                template="plotly_dark",
+                                height=360, 
+                                margin=dict(t=5, b=5, l=10, r=10),
+                                xaxis=dict(range=[0, 1.05], title="Score Value (0.0 - 1.0)", gridcolor="#334155"),
+                                yaxis=dict(
+                                    title="", 
+                                    autorange="reversed",
+                                    categoryorder="array",
+                                    categoryarray=metrics_list
+                                ),
+                                showlegend=False
+                            )
+                            
+                            fig.update_traces(
+                                textposition='inside', 
+                                insidetextanchor='middle',
+                                textfont=dict(size=12, color="white", family="Arial Black")
+                            )
+
+                            st.plotly_chart(fig, use_container_width=True)
+                            
+                            if chart_df["Label"].str.contains("N/A").any():
+                                st.caption("⚠️ Một số metric đang hiển thị dạng N/A. Bạn có thể cập nhật chúng trong file JSON kết quả ở backend.")
+                        else:
+                            st.write("No additional metrics available.")
+
+            # --- BIỂU ĐỒ SO SÁNH ĐA ĐỒNG BỘ (HEATMAP MATRIX - PHÓNG TO TỐI ĐA) ---
+            # --- BIỂU ĐỒ SO SÁNH ĐA ĐỒNG BỘ (HEATMAP MATRIX - PHÓNG TO CHUẨN) ---
             if len(selected_models) >= 2:
                 st.markdown("---")
-                st.subheader("Models Comparison Analysis")
+                st.subheader("Models Comparison Analysis (Heatmap View)")
                 
                 df_compare = pd.DataFrame(raw_metrics_for_plot)
                 
-                col_comp1, col_comp2 = st.columns(2)
+                st.markdown("#### Performance Metrics Heatmap Matrix")
                 
-                with col_comp1:
-                    # So sánh số lượng bất thường tìm được
-                    fig_anom = px.bar(
-                        df_compare, x="Model", y="Anomalies Found", color="Model",
-                        title="Total Anomalies Detected by Model",
-                        text="Anomalies Found",
-                        color_discrete_sequence=px.colors.qualitative.Pastel
-                    )
-                    fig_anom.update_layout(template="plotly_dark")
-                    st.plotly_chart(fig_anom, use_container_width=True)
+                # Sao chép dataframe để xử lý dữ liệu số
+                df_heatmap_input = df_compare.copy()
+                
+                # Lọc động: Chỉ lấy những chỉ số thực sự tồn tại trong DataFrame dựa trên metrics_list gốc
+                available_compare_metrics = [m for m in metrics_list if m in df_heatmap_input.columns]
+                
+                if available_compare_metrics:
+                    # Ép kiểu tất cả các cột metric về dạng số (float)
+                    for col in available_compare_metrics:
+                        df_heatmap_input[col] = pd.to_numeric(df_heatmap_input[col], errors='coerce').fillna(0.0)
                     
-                with col_comp2:
-                    # So sánh thời gian xử lý
-                    fig_time = px.bar(
-                        df_compare, x="Model", y="Processing Time (s)", color="Model",
-                        title="Processing Speed Comparison (Lower is better)",
-                        text=df_compare["Processing Time (s)"].round(1).astype(str) + " s",
-                        color_discrete_sequence=px.colors.qualitative.Set2
-                    )
-                    fig_time.update_layout(template="plotly_dark")
-                    st.plotly_chart(fig_time, use_container_width=True)
-
-                # Nếu có nhãn thực tế, vẽ thêm biểu đồ so sánh Accuracy và F1-Score
-                if has_label:
-                    st.markdown("#### Performance Metrics")
-                    df_metrics_melted = df_compare.melt(
-                        id_vars=["Model"], 
-                        value_vars=["Accuracy", "F1-Score"], 
-                        var_name="Metric", 
-                        value_name="Score"
+                    # Biến đổi dữ liệu: Đặt 'Model' làm Index (Trục Y) và chọn toàn bộ cột chỉ số (Trục X)
+                    df_heatmap_matrix = df_heatmap_input.set_index("Model")[available_compare_metrics]
+                    
+                    # Vẽ biểu đồ ma trận nhiệt Heatmap với tone màu Đơn sắc xanh dương
+                    fig_heatmap = px.imshow(
+                        df_heatmap_matrix,
+                        text_auto=".3f",                 # Tự động in số lên ô, làm tròn 3 chữ số thập phân
+                        color_continuous_scale="Blues",     # Tone đơn sắc xanh dương (đậm dần = tốt dần)
+                        title="Model Performance Heatmap (Darker Blue is better)",
+                        labels=dict(x="Performance Metrics", y="Models", color="Score")
                     )
                     
-                    fig_metrics = px.bar(
-                        df_metrics_melted, x="Model", y="Score", color="Metric", barmode="group",
-                        title="Accuracy & F1-Score Comparison",
-                        text=df_metrics_melted["Score"].round(3)
+                    fig_heatmap.update_layout(
+                        template="plotly_dark", 
+                        height=650,                      # Chiều cao phóng to toàn diện lên 650px
+                        margin=dict(t=80, b=80, l=80, r=80), # Nới rộng lề tối đa cho thoáng chữ trục X và Y
+                        
+                        title=dict(
+                            text="Model Performance Heatmap (Darker Blue is better)",
+                            font=dict(size=18)           # Phóng to chữ tiêu đề biểu đồ
+                        ),
+                        
+                        # ĐÃ SỬA: Loại bỏ thuộc tính 'font' không hợp lệ, phóng to trực tiếp qua 'tickfont'
+                        xaxis=dict(tickfont=dict(size=14)), # Cỡ chữ các nhãn chỉ số ngang
+                        yaxis=dict(tickfont=dict(size=14)), # Cỡ chữ các nhãn tên Mô hình dọc
+                        
+                        # Cấu hình thanh đo màu sắc (Colorbar) tương xứng với biểu đồ lớn
+                        coloraxis_colorbar=dict(
+                            title="Score",
+                            title_font=dict(size=14),
+                            tickfont=dict(size=12),
+                            thicknessmode="pixels", thickness=22, # Tăng độ dày thanh màu
+                            lenmode="pixels", len=400,            # Kéo dài thanh màu lên 400px cho cân đối dọc
+                            yanchor="middle", y=0.5
+                        )
                     )
-                    fig_metrics.update_layout(template="plotly_dark", yaxis_range=[0, 1.1])
-                    st.plotly_chart(fig_metrics, use_container_width=True)
-
+                    
+                    # PHÓNG TO CHỮ SỐ BÊN TRONG CÁC Ô HEATMAP
+                    fig_heatmap.update_traces(
+                        textfont=dict(size=15, weight='bold') # Đẩy cỡ chữ số lên 15 và in đậm cho cực kỳ dễ đọc
+                    )
+                    
+                    # Hiển thị biểu đồ bao phủ toàn bộ chiều ngang vùng chứa (Container)
+                    st.plotly_chart(fig_heatmap, use_container_width=True)
+                else:
+                    st.warning("⚠️ Không tìm thấy các cột dữ liệu chỉ số (Metrics) tương ứng trong kết quả so sánh.")
 else:
     st.info("Please upload a CSV file to start testing and comparison.")
