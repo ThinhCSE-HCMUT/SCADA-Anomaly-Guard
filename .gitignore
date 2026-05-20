@@ -22,3 +22,4 @@ venv_tf213/
 
 # Streamlit local secrets
 .streamlit/secrets.toml
+.streamlit/keras_compat/

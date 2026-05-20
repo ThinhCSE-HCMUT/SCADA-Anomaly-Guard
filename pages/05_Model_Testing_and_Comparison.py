@@ -8,16 +8,40 @@ import pandas as pd
 import numpy as np
 import time
 import joblib
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+from sklearn.metrics import (
+    accuracy_score,
+    average_precision_score,
+    f1_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
 import plotly.express as px
 from xgboost import XGBClassifier
 from src.model_manager import load_model
 import os
 import json
+import hashlib
+import zipfile
 from pathlib import Path
 
 from src.sidebar import render_sidebar
-from src.config import AVAILABLE_MODELS, CHART_SENSOR_COLS, DEFAULT_TABLE_ROWS, MODEL_THRESHOLDS, XGBOOST_FORECAST_OPTIONS, XGBOOST_FORECAST_MODEL_PATHS, RF_FORECAST_OPTIONS, RF_FORECAST_MODEL_PATHS, DL_FORECAST_MODEL_PATHS, FEATURE_COLS
+from src.config import (
+    AVAILABLE_MODELS,
+    CHART_SENSOR_COLS,
+    DEFAULT_TABLE_ROWS,
+    DL_FORECAST_MODEL_PATHS,
+    FEATURE_COLS,
+    LOCAL_PREDICTION_SCALER_DIR,
+    MODEL_THRESHOLDS,
+    PREDICTION_CLASSIFIER_EXPORT_DIR,
+    PREDICTION_WINDOW_STEPS,
+    RF_FORECAST_MODEL_PATHS,
+    RF_FORECAST_OPTIONS,
+    ROOT_DIR,
+    XGBOOST_FORECAST_MODEL_PATHS,
+    XGBOOST_FORECAST_OPTIONS,
+)
 from tensorflow.keras.models import load_model as keras_load_model
 st.set_page_config(
     page_title="Model Testing and Comparison", 
@@ -206,6 +230,272 @@ def validate_uploaded_csv(df):
 
     return True, None
 
+
+SEQUENCE_MODEL_NAMES = {"LSTM", "GRU", "CNN - LSTM", "CNN - GRU"}
+LIVE_INFERENCE_BATCH_SIZE = 1024
+DEFAULT_SEQUENCE_STRIDE_STEPS = 6
+
+
+@st.cache_resource(show_spinner=False)
+def load_keras_model_for_inference(model_path: str):
+    original_path = Path(model_path)
+    errors = []
+
+    try:
+        return _load_keras_model_path(original_path)
+    except Exception as exc:
+        errors.append(f"original: {exc}")
+
+    try:
+        compat_path = build_keras_compat_archive(original_path)
+        return _load_keras_model_path(compat_path)
+    except Exception as exc:
+        errors.append(f"compat: {exc}")
+
+    raise RuntimeError(" | ".join(errors))
+
+
+def _load_keras_model_path(model_path: Path):
+    try:
+        return keras_load_model(str(model_path), compile=False, safe_mode=False)
+    except TypeError:
+        return keras_load_model(str(model_path), compile=False)
+
+
+def strip_keras_incompatible_config(value):
+    if isinstance(value, dict):
+        return {
+            key: strip_keras_incompatible_config(item)
+            for key, item in value.items()
+            if key != "quantization_config"
+        }
+    if isinstance(value, list):
+        return [strip_keras_incompatible_config(item) for item in value]
+    return value
+
+
+def build_keras_compat_archive(model_path: Path) -> Path:
+    if not zipfile.is_zipfile(model_path):
+        return model_path
+
+    digest = hashlib.sha256(model_path.read_bytes()).hexdigest()[:12]
+    compat_dir = ROOT_DIR / ".streamlit" / "keras_compat"
+    compat_dir.mkdir(parents=True, exist_ok=True)
+    compat_path = compat_dir / f"{model_path.stem}-{digest}.keras"
+    if compat_path.exists():
+        return compat_path
+
+    with zipfile.ZipFile(model_path, "r") as src:
+        config = json.loads(src.read("config.json").decode("utf-8"))
+        config = strip_keras_incompatible_config(config)
+
+        with zipfile.ZipFile(compat_path, "w", compression=zipfile.ZIP_DEFLATED) as dst:
+            for info in src.infolist():
+                if info.filename == "config.json":
+                    dst.writestr(
+                        info,
+                        json.dumps(config, ensure_ascii=False, separators=(",", ":")),
+                    )
+                else:
+                    dst.writestr(info, src.read(info.filename))
+
+    return compat_path
+
+
+@st.cache_resource(show_spinner=False)
+def load_scaler_for_inference(scaler_path: str):
+    return joblib.load(scaler_path)
+
+
+@st.cache_data(show_spinner=False)
+def load_sequence_metadata_settings():
+    metadata_path = PREDICTION_CLASSIFIER_EXPORT_DIR / "metadata.json"
+    if not metadata_path.exists():
+        return {
+            "feature_cols": CHART_SENSOR_COLS,
+            "window_steps": PREDICTION_WINDOW_STEPS,
+            "stride_steps": DEFAULT_SEQUENCE_STRIDE_STEPS,
+            "metadata_path": "",
+        }
+
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except Exception:
+        metadata = {}
+
+    return {
+        "feature_cols": metadata.get("feature_cols") or CHART_SENSOR_COLS,
+        "window_steps": int(metadata.get("window_steps") or PREDICTION_WINDOW_STEPS),
+        "stride_steps": int(metadata.get("stride_steps") or DEFAULT_SEQUENCE_STRIDE_STEPS),
+        "metadata_path": str(metadata_path),
+    }
+
+
+def get_model_input_shape(model):
+    input_shape = getattr(model, "input_shape", None)
+    if isinstance(input_shape, list) and input_shape:
+        input_shape = input_shape[0]
+    if not isinstance(input_shape, tuple) or len(input_shape) != 3:
+        return None, None
+    return input_shape[1], input_shape[2]
+
+
+def get_target_column(df, forecast_horizon: str):
+    if forecast_horizon == "Current":
+        if "label_in_0h" in df.columns:
+            return "label_in_0h"
+        if "label" in df.columns:
+            return "label"
+        return None
+
+    horizon_col = f"label_in_{forecast_horizon}"
+    if horizon_col in df.columns:
+        return horizon_col
+    return "label" if "label" in df.columns else None
+
+
+def iter_sequence_groups(df):
+    group_df = df.copy()
+    group_df["asset_id"] = pd.to_numeric(group_df["asset_id"], errors="coerce")
+    group_df = group_df.dropna(subset=["asset_id"]).copy()
+    group_df["asset_id"] = group_df["asset_id"].astype(int)
+
+    sort_cols = ["asset_id"]
+    if "sequence_id" in group_df.columns:
+        sort_cols.append("sequence_id")
+    if "time_stamp" in group_df.columns:
+        group_df["time_stamp"] = pd.to_datetime(group_df["time_stamp"], errors="coerce")
+        sort_cols.append("time_stamp")
+
+    group_df = group_df.sort_values(sort_cols, kind="mergesort").reset_index(drop=True)
+
+    if "sequence_id" in group_df.columns:
+        group_cols = ["asset_id", "sequence_id"]
+    elif "time_stamp" in group_df.columns:
+        group_df["__sequence_segment"] = group_df.groupby("asset_id")["time_stamp"].transform(
+            lambda s: s.diff().gt(pd.Timedelta(minutes=20)).fillna(False).cumsum()
+        )
+        group_cols = ["asset_id", "__sequence_segment"]
+    else:
+        group_cols = ["asset_id"]
+
+    for _, group in group_df.groupby(group_cols, sort=False):
+        yield int(group["asset_id"].iloc[0]), group.reset_index(drop=True)
+
+
+def safe_auc(metric_fn, y_true, scores):
+    if len(np.unique(y_true)) < 2:
+        return None
+    try:
+        return float(metric_fn(y_true, scores))
+    except Exception:
+        return None
+
+
+def compute_live_metrics(y_true, scores, threshold):
+    y_true = np.asarray(y_true, dtype=int)
+    scores = np.asarray(scores, dtype=float)
+    pred_labels = (scores >= threshold).astype(int)
+
+    return {
+        "accuracy": float(accuracy_score(y_true, pred_labels)),
+        "precision": float(precision_score(y_true, pred_labels, zero_division=0)),
+        "recall": float(recall_score(y_true, pred_labels, zero_division=0)),
+        "f1": float(f1_score(y_true, pred_labels, zero_division=0)),
+        "pr_auc": safe_auc(average_precision_score, y_true, scores),
+        "roc_auc": safe_auc(roc_auc_score, y_true, scores),
+        "threshold": float(threshold),
+        "evaluated_samples": int(len(y_true)),
+        "positive_count": int(y_true.sum()),
+        "predicted_positive_count": int(pred_labels.sum()),
+        "source": "live_inference",
+    }
+
+
+def run_sequence_live_inference(df, model_name: str, forecast_horizon: str):
+    horizon_paths = DL_FORECAST_MODEL_PATHS.get(model_name, {})
+    model_path = Path(horizon_paths.get(forecast_horizon, ""))
+    if not model_path.exists():
+        raise FileNotFoundError(f"Model file not found: {model_path}")
+
+    metadata = load_sequence_metadata_settings()
+    feature_cols = list(metadata["feature_cols"])
+    missing_features = [col for col in feature_cols if col not in df.columns]
+    if missing_features:
+        raise ValueError(
+            "Missing sequence features: "
+            + ", ".join(missing_features[:8])
+            + ("..." if len(missing_features) > 8 else "")
+        )
+
+    target_col = get_target_column(df, forecast_horizon)
+    if target_col is None:
+        raise ValueError("No label column found for live metric calculation")
+
+    model = load_keras_model_for_inference(str(model_path))
+    shape_steps, shape_features = get_model_input_shape(model)
+    window_steps = int(shape_steps or metadata["window_steps"])
+    if shape_features is not None and int(shape_features) != len(feature_cols):
+        raise ValueError(
+            f"Model expects {shape_features} features, but upload/metadata provides {len(feature_cols)}"
+        )
+
+    stride_steps = max(1, int(metadata["stride_steps"]))
+    threshold = float(MODEL_THRESHOLDS.get(model_name, {}).get(forecast_horizon, 0.5))
+
+    all_scores = []
+    all_labels = []
+    generated_windows = 0
+    skipped_assets = []
+
+    for asset_id, group in iter_sequence_groups(df):
+        if len(group) < window_steps:
+            continue
+
+        scaler_path = LOCAL_PREDICTION_SCALER_DIR / f"asset_{asset_id}.pkl"
+        if not scaler_path.exists():
+            skipped_assets.append(asset_id)
+            continue
+
+        scaler = load_scaler_for_inference(str(scaler_path))
+        feature_frame = group[feature_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0)
+        scaled = scaler.transform(feature_frame.to_numpy(dtype=np.float32))
+        target_values = pd.to_numeric(group[target_col], errors="coerce").to_numpy()
+        end_indices = np.arange(window_steps - 1, len(group), stride_steps, dtype=int)
+
+        for batch_start in range(0, len(end_indices), LIVE_INFERENCE_BATCH_SIZE):
+            batch_end_indices = end_indices[batch_start : batch_start + LIVE_INFERENCE_BATCH_SIZE]
+            X = np.stack(
+                [scaled[end_idx - window_steps + 1 : end_idx + 1] for end_idx in batch_end_indices],
+                axis=0,
+            ).astype(np.float32)
+            scores = np.asarray(model.predict(X, verbose=0)).reshape(-1)
+            labels = target_values[batch_end_indices]
+            valid_mask = ~pd.isna(labels)
+            if valid_mask.any():
+                all_scores.extend(scores[valid_mask].astype(float).tolist())
+                all_labels.extend(labels[valid_mask].astype(int).tolist())
+            generated_windows += int(len(batch_end_indices))
+
+    if not all_labels:
+        raise ValueError("No labeled windows were generated for live inference")
+
+    metrics = compute_live_metrics(all_labels, all_scores, threshold)
+    details = {
+        "model_path": str(model_path),
+        "threshold": threshold,
+        "threshold_source": "MODEL_THRESHOLDS",
+        "scaler_dir": str(LOCAL_PREDICTION_SCALER_DIR),
+        "feature_count": len(feature_cols),
+        "window_steps": window_steps,
+        "stride_steps": stride_steps,
+        "target_col": target_col,
+        "generated_windows": generated_windows,
+        "skipped_assets": sorted(set(skipped_assets)),
+        "metadata_path": metadata.get("metadata_path", ""),
+    }
+    return metrics, details
+
 df_buffer = load_buffer()
 
 # ====================== GIAO DIỆN CHÍNH ======================
@@ -276,7 +566,7 @@ if uploaded_file is not None:
             st.warning("Please select at least one model!")
             st.stop()
 
-        with st.spinner("Loading stored model performance..."):
+        with st.spinner("Running live inference and loading saved performance fallback..."):
             perf_path = Path("models") / "model_performance.json"
             if perf_path.exists():
                 try:
@@ -290,13 +580,38 @@ if uploaded_file is not None:
 
             results = []
             raw_metrics_for_plot = []
+            inference_details = {}
 
             for model_name in selected_models:
                 display_model_name = model_name
                 if model_name in ["XGBoost", "Random Forest", "LSTM", "GRU", "CNN - LSTM", "CNN - GRU"]:
                     display_model_name = f"{model_name} ({forecast_horizon})"
 
-                perf_entry = model_perf.get(model_name, {}).get(forecast_horizon, {}) if model_perf else {}
+                saved_perf_entry = model_perf.get(model_name, {}).get(forecast_horizon, {}) if model_perf else {}
+                perf_entry = dict(saved_perf_entry)
+                source_label = "saved_json" if saved_perf_entry else "unavailable"
+
+                if model_name in SEQUENCE_MODEL_NAMES:
+                    try:
+                        live_entry, live_details = run_sequence_live_inference(df, model_name, forecast_horizon)
+                        perf_entry = live_entry
+                        source_label = "live_inference"
+                        inference_details[display_model_name] = {
+                            "status": "live_inference",
+                            **live_details,
+                        }
+                    except Exception as exc:
+                        inference_details[display_model_name] = {
+                            "status": "saved_json_fallback" if saved_perf_entry else "failed",
+                            "error": str(exc),
+                        }
+                        if saved_perf_entry:
+                            st.warning(
+                                f"Live inference failed for {display_model_name}; "
+                                f"showing saved JSON metrics instead. Error: {exc}"
+                            )
+                        else:
+                            st.error(f"Live inference failed for {display_model_name}: {exc}")
 
                 def fmt(x):
                     return f"{x:.2f}" if isinstance(x, (int, float)) else (str(x) if x is not None and x != "" else "N/A")
@@ -309,6 +624,9 @@ if uploaded_file is not None:
                     "Recall": fmt(perf_entry.get("recall")),
                     "PR-AUC": fmt(perf_entry.get("pr_auc")),
                     "ROC-AUC": fmt(perf_entry.get("roc_auc")),
+                    "Threshold": fmt(perf_entry.get("threshold")),
+                    "Samples": fmt(perf_entry.get("evaluated_samples")),
+                    "Source": source_label,
                 }
                 results.append(model_result)
                 
@@ -377,6 +695,24 @@ if uploaded_file is not None:
                                 <div style="font-size: 18px; color: #f8fafc; font-weight: 700; line-height: 1.2;">{total_samples_str}</div>
                             </div>
                         """, unsafe_allow_html=True)
+
+                        inference_detail = inference_details.get(display_model_name)
+                        if inference_detail:
+                            if inference_detail.get("status") == "live_inference":
+                                st.caption(
+                                    "Live inference: "
+                                    f"{model_row.get('Samples', 'N/A')} windows, "
+                                    f"threshold {model_row.get('Threshold', 'N/A')}, "
+                                    f"window {inference_detail.get('window_steps')} rows, "
+                                    f"stride {inference_detail.get('stride_steps')}, "
+                                    f"label `{inference_detail.get('target_col')}`."
+                                )
+                                st.caption(f"Model path: {inference_detail.get('model_path')}")
+                            else:
+                                st.caption(
+                                    "Saved JSON fallback: "
+                                    f"{inference_detail.get('error', 'live inference unavailable')}"
+                                )
                         
                         if model_row is not None:
                             for metric in metrics_list:

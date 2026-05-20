@@ -12,11 +12,28 @@ DATA_DIR         = ROOT_DIR / "data"
 MODELS_DIR       = ROOT_DIR / "models"
 ASSETS_DIR       = ROOT_DIR / "assets"
 
+# External training repo artifacts used for sequence prediction.
+TRAINING_REPO_DIR = Path(r"D:\Final Project\scada-fault-prediction")
+PREDICTION_RESULTS_ROOT = TRAINING_REPO_DIR / "results" / "New_results" / "New_results"
+PREDICTION_CLASSIFIER_EXPORT_DIR = (
+    TRAINING_REPO_DIR
+    / "Dataset"
+    / "processed"
+    / "sequence_exports"
+    / "window_24h"
+    / "classifier"
+)
+
 # Data files
-# df_simulation.csv: 88 cols (17 base + 68 rolling + label + meta)
+# df_simulation.csv is the legacy flat-feature stream for ML current detection.
 REALTIME_DATA_PATH = DATA_DIR / "df_simulation.csv"
 TEST_DATA_PATH     = DATA_DIR / "test_data.csv"
 SAMPLE_DATA_PATH   = DATA_DIR / "sample_data.csv"
+RAW_WIND_FARM_A_DIR = DATA_DIR / "Wind Farm A"
+RAW_WIND_FARM_A_DATASETS_DIR = RAW_WIND_FARM_A_DIR / "datasets"
+RAW_WIND_FARM_A_EVENT_INFO = RAW_WIND_FARM_A_DIR / "event_info.csv"
+LOCAL_PREDICTION_FEATURE_FILE = DATA_DIR / "feature_screening_per_event" / "final_21_features.csv"
+RAW_PREDICTION_SPLIT = "prediction"
 
 # ====================== MODEL CONFIGURATION ======================
 AVAILABLE_MODELS = {
@@ -46,7 +63,7 @@ MODEL_THRESHOLDS = {
         "72h": 0.391
     },
     "CNN - LSTM": {
-        "Current": 0.245,
+        "Current": 0.168,
         "12h": 0.27,
         "24h": 0.445,
         "36h": 0.668,
@@ -133,6 +150,27 @@ DL_FORECAST_MODEL_PATHS = {
     }
     for model_name, horizon_map in DL_FORECAST_OPTIONS.items()
 }
+
+PREDICTION_HORIZON_RUNS = {
+    "12h": "sequence_training_pred_12h_window_24h",
+    "24h": "sequence_training_pred_24h_window_24h",
+    "36h": "sequence_training_pred_36h_window_24h",
+    "48h": "sequence_training_pred_48h_window_24h",
+    "72h": "sequence_training_pred_72h_window_24h",
+}
+
+DEFAULT_PREDICTION_MODEL_BY_HORIZON = {
+    "12h": "CNN - LSTM",
+    "24h": "CNN - LSTM",
+    "36h": "CNN - LSTM",
+    "48h": "CNN - LSTM",
+    "72h": "CNN - LSTM",
+}
+
+PREDICTION_HORIZONS = list(PREDICTION_HORIZON_RUNS.keys())
+DEFAULT_PREDICTION_HORIZON = "24h"
+PREDICTION_WINDOW_STEPS = 144
+LOCAL_PREDICTION_SCALER_DIR = MODELS_DIR / "DeepLearning" / "DL_scaler"
 
 # Full resolved paths — used by load_model()
 MODEL_PATHS = {

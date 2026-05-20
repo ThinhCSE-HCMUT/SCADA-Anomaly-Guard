@@ -27,6 +27,9 @@ if "acknowledged_alerts" not in st.session_state:
 if "anomaly_records" not in st.session_state:
     st.session_state.anomaly_records = []
 
+if "future_risk_records" not in st.session_state:
+    st.session_state.future_risk_records = []
+
 if "system_logs" not in st.session_state:
     st.session_state.system_logs = [
         {"Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Event": "System initialized and dashboard loaded"}
@@ -59,13 +62,28 @@ if not df_alerts.empty:
     df_alerts = df_alerts.sort_values('time', ascending=False)
 
 
+df_future_alerts = pd.DataFrame(st.session_state.future_risk_records)
+if not df_future_alerts.empty:
+    df_future_alerts['time'] = pd.to_datetime(df_future_alerts['time'])
+    df_future_alerts['alert_id'] = (
+        "Future Risk_"
+        + df_future_alerts['turbine'].astype(str)
+        + "_"
+        + df_future_alerts['horizon'].fillna("").astype(str)
+        + "_"
+        + df_future_alerts['time'].astype(str)
+    )
+    df_future_alerts = df_future_alerts[
+        ~df_future_alerts['alert_id'].isin(st.session_state.acknowledged_alerts)
+    ].sort_values('time', ascending=False)
+
 # ====================== FILTERS ======================
 col1, col2, col3 = st.columns([2, 2, 2])
 
 with col1:
     alert_type = st.selectbox(
         "Alert Type",
-        options=["All Alerts", "Anomaly"] # Hiện tại engine chỉ log Anomaly
+        options=["All Alerts", "Anomaly", "Future Risk"]
     )
 
 with col2:
@@ -89,6 +107,20 @@ if not df_alerts.empty:
         df_alerts = df_alerts.head(50)
     elif time_range == "Last 200 events":
         df_alerts = df_alerts.head(200)
+
+if not df_future_alerts.empty:
+    if turbine_filter != "All Turbines":
+        df_future_alerts = df_future_alerts[df_future_alerts["turbine"] == turbine_filter]
+
+    if time_range == "Last 50 events":
+        df_future_alerts = df_future_alerts.head(50)
+    elif time_range == "Last 200 events":
+        df_future_alerts = df_future_alerts.head(200)
+
+if alert_type == "Anomaly":
+    df_future_alerts = pd.DataFrame()
+elif alert_type == "Future Risk":
+    df_alerts = pd.DataFrame()
 
 # ====================== DISPLAY ALERTS ======================
 st.subheader(f"Recent Alerts ({len(df_alerts)} active events)")
@@ -231,6 +263,50 @@ else:
              if st.button("Next ▶", disabled=(current_page == total_pages), use_container_width=True):
                 st.session_state.alert_page += 1
                 st.rerun()
+
+st.divider()
+
+st.subheader(f"Future Risk Alerts ({len(df_future_alerts)} active events)")
+
+if df_future_alerts.empty:
+    if len(st.session_state.future_risk_records) == 0:
+        st.info("Waiting for prediction data... No future-risk alerts detected yet.")
+    else:
+        st.markdown("""
+            <div style="color: #22c55e; padding: 15px; border: 1px solid #22c55e; border-radius: 5px;">
+                All clear! All future-risk alerts have been acknowledged or filtered out.
+            </div>
+        """, unsafe_allow_html=True)
+else:
+    for _, alert in df_future_alerts.head(20).iterrows():
+        alert_id = alert['alert_id']
+        with st.container(border=True):
+            cols = st.columns([1.5, 2, 1.3, 1.5, 1.5, 1.5])
+            with cols[0]:
+                st.markdown(f"**{alert['time'].strftime('%Y-%m-%d %H:%M:%S')}**")
+            with cols[1]:
+                st.write(f"**{alert['turbine']}**")
+            with cols[2]:
+                st.markdown(
+                    f"<span style='color:{STATUS_COLORS['Warning']}; font-weight:bold;'>Future Risk</span>",
+                    unsafe_allow_html=True,
+                )
+            with cols[3]:
+                st.write(f"Horizon: **{alert.get('horizon', '')}**")
+            with cols[4]:
+                st.write(f"Score: **{float(alert['score']):.2f}**")
+            with cols[5]:
+                if st.button("Acknowledge", key=f"future_{alert_id}", use_container_width=True):
+                    st.session_state.acknowledged_alerts.add(alert_id)
+                    add_system_log(
+                        f"Future risk acknowledged: {alert['turbine']} "
+                        f"{alert.get('horizon', '')} (Score: {float(alert['score']):.2f})"
+                    )
+                    st.rerun()
+            st.caption(
+                f"Prediction model: {alert.get('model', '')}. "
+                f"Threshold: {alert.get('threshold', '')}."
+            )
 
 st.divider()
 

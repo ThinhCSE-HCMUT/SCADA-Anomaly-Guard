@@ -2,33 +2,117 @@ import pandas as pd
 import streamlit as st
 
 from src.config import (
-    TARGET_TURBINES, TURBINE_LABELS, 
-    SIMULATION_BATCH_SIZE, SIMULATION_MAX_HISTORY
+    DEFAULT_PREDICTION_HORIZON,
+    PREDICTION_WINDOW_STEPS,
+    SIMULATION_BATCH_SIZE,
+    SIMULATION_MAX_HISTORY,
+    TARGET_TURBINES,
+    TURBINE_LABELS,
 )
-# Đã tách các hàm ra, giờ chỉ cần import vào để dùng
-from src.data_loader import load_data, split_by_turbine
-from src.model_manager import load_model
+from src.data_loader import load_legacy_data, load_online_prediction_data, split_by_turbine
 from src.inference import predict_batch
+from src.model_manager import load_model
+from src.prediction import predict_future_risk_batch
 
-# ====================== CORE ENGINE ======================
-def run_simulation_step():
-    """Hàm chạy 1 nhịp mô phỏng, dùng chung cho mọi trang."""
-    raw_df = load_data()
-    if raw_df.empty:
-        return "NO_DATA"
 
-    turbine_dfs = split_by_turbine(raw_df)
+def _trim_history(df: pd.DataFrame, rows_per_asset: int) -> pd.DataFrame:
+    if df.empty or "asset_id" not in df.columns:
+        return df
+    if len(df) <= rows_per_asset * len(TARGET_TURBINES):
+        return df
+
+    sort_cols = [col for col in ("asset_id", "sequence_id", "time_stamp", "id") if col in df.columns]
+    return (
+        df.sort_values(sort_cols, kind="mergesort")
+        .groupby("asset_id", group_keys=False)
+        .apply(lambda g: g.tail(rows_per_asset))
+        .reset_index(drop=True)
+    )
+
+
+def _run_legacy_detection_step() -> bool:
+    """Keep the old current-detection path on df_simulation.csv and 105 features."""
+    legacy_df = load_legacy_data()
+    if legacy_df.empty:
+        return False
+
+    legacy_dfs = split_by_turbine(legacy_df)
     running_model = load_model(st.session_state.selected_model)
-    
+    st.session_state.setdefault("legacy_turbine_steps", {tid: 0 for tid in TARGET_TURBINES})
+    st.session_state.setdefault("legacy_stream_done", {tid: False for tid in TARGET_TURBINES})
+    st.session_state.setdefault("legacy_history_data", pd.DataFrame())
+    st.session_state.setdefault("anomaly_records", [])
+
     new_rows = []
     any_active = False
 
     for tid in TARGET_TURBINES:
-        if st.session_state.stream_done[tid]:
+        if st.session_state.legacy_stream_done.get(tid, False):
             continue
 
-        step = st.session_state.turbine_steps[tid]
-        batch = turbine_dfs[tid].iloc[
+        step = st.session_state.legacy_turbine_steps.get(tid, 0)
+        batch = legacy_dfs[tid].iloc[
+            step * SIMULATION_BATCH_SIZE : (step + 1) * SIMULATION_BATCH_SIZE
+        ].copy()
+
+        if batch.empty:
+            st.session_state.legacy_stream_done[tid] = True
+            continue
+
+        pred_labels, pred_probas = predict_batch(running_model, batch)
+        batch["pred_label"] = pred_labels
+        batch["anomaly_score"] = pred_probas
+        batch["model_used"] = st.session_state.selected_model
+
+        new_rows.append(batch)
+        any_active = True
+        st.session_state.legacy_turbine_steps[tid] = step + 1
+
+        for _, row in batch[batch["pred_label"] == 1].iterrows():
+            st.session_state.anomaly_records.append(
+                {
+                    "time": row["time_stamp"],
+                    "turbine": TURBINE_LABELS[tid],
+                    "score": round(float(row["anomaly_score"]), 3),
+                }
+            )
+
+    if new_rows:
+        st.session_state.legacy_history_data = pd.concat(
+            [st.session_state.legacy_history_data, *new_rows],
+            ignore_index=True,
+        )
+        st.session_state.legacy_history_data = _trim_history(
+            st.session_state.legacy_history_data,
+            SIMULATION_MAX_HISTORY,
+        )
+
+    return any_active
+
+
+def run_simulation_step():
+    """Run one dashboard tick for all-turbine DL prediction plus legacy detection."""
+    prediction_df = load_online_prediction_data()
+    if prediction_df.empty:
+        st.session_state.is_monitoring = False
+        return "NO_DATA"
+
+    prediction_dfs = split_by_turbine(prediction_df)
+    prediction_horizon = st.session_state.get("prediction_horizon", DEFAULT_PREDICTION_HORIZON)
+    st.session_state.setdefault("turbine_steps", {tid: 0 for tid in TARGET_TURBINES})
+    st.session_state.setdefault("stream_done", {tid: False for tid in TARGET_TURBINES})
+    st.session_state.setdefault("history_data", pd.DataFrame())
+    st.session_state.setdefault("future_risk_records", [])
+
+    new_rows = []
+    prediction_active = False
+
+    for tid in TARGET_TURBINES:
+        if st.session_state.stream_done.get(tid, False):
+            continue
+
+        step = st.session_state.turbine_steps.get(tid, 0)
+        batch = prediction_dfs[tid].iloc[
             step * SIMULATION_BATCH_SIZE : (step + 1) * SIMULATION_BATCH_SIZE
         ].copy()
 
@@ -36,43 +120,53 @@ def run_simulation_step():
             st.session_state.stream_done[tid] = True
             continue
 
-        # Predict từ file inference
-        pred_labels, pred_probas = predict_batch(running_model, batch)
-        batch['pred_label'] = pred_labels
-        batch['anomaly_score'] = pred_probas
-        batch['model_used'] = st.session_state.selected_model
+        future_risk = predict_future_risk_batch(
+            tid,
+            st.session_state.history_data,
+            batch,
+            prediction_horizon,
+        )
+        batch["future_risk_score"] = future_risk["scores"]
+        batch["future_risk_label"] = future_risk["labels"]
+        batch["future_prediction_status"] = future_risk["statuses"]
+        batch["future_horizon"] = future_risk["horizon"]
+        batch["future_model"] = future_risk["model_name"]
+        batch["future_threshold"] = future_risk["threshold"]
 
         new_rows.append(batch)
-        any_active = True
-        st.session_state.turbine_steps[tid] += 1
+        prediction_active = True
+        st.session_state.turbine_steps[tid] = step + 1
 
-        # Lưu log anomaly
-        for _, r in batch[batch['pred_label'] == 1].iterrows():
-            st.session_state.anomaly_records.append({
-                "time"   : r['time_stamp'],
-                "turbine": TURBINE_LABELS[tid],
-                "score"  : round(float(r['anomaly_score']), 3),
-            })
+        for _, row in batch[batch["future_risk_label"] == 1].iterrows():
+            if pd.notna(row.get("future_risk_score")):
+                st.session_state.future_risk_records.append(
+                    {
+                        "time": row["time_stamp"],
+                        "turbine": TURBINE_LABELS[tid],
+                        "event_id": int(row.get("sequence_id", -1)),
+                        "event_label": row.get("event_label", ""),
+                        "event_description": row.get("event_description", ""),
+                        "score": round(float(row["future_risk_score"]), 3),
+                        "horizon": row.get("future_horizon", prediction_horizon),
+                        "model": row.get("future_model", ""),
+                        "threshold": round(float(row.get("future_threshold", 0.0)), 3),
+                    }
+                )
 
-    # Cập nhật lịch sử
     if new_rows:
         st.session_state.history_data = pd.concat(
             [st.session_state.history_data, *new_rows],
             ignore_index=True,
         )
-
-    # Trim history per turbine để không bị tràn RAM
-    hist = st.session_state.history_data
-    if len(hist) > SIMULATION_MAX_HISTORY * len(TARGET_TURBINES):
-        st.session_state.history_data = (
-            hist.groupby('asset_id', group_keys=False)
-                .apply(lambda g: g.tail(SIMULATION_MAX_HISTORY))
-                .reset_index(drop=True)
+        st.session_state.history_data = _trim_history(
+            st.session_state.history_data,
+            max(SIMULATION_MAX_HISTORY, PREDICTION_WINDOW_STEPS + SIMULATION_BATCH_SIZE),
         )
 
-    # Kiểm tra kết thúc
-    if not any_active or all(st.session_state.stream_done.values()):
+    _run_legacy_detection_step()
+
+    if not prediction_active and all(st.session_state.stream_done.values()):
         st.session_state.is_monitoring = False
         return "DONE"
-        
+
     return "RUNNING"

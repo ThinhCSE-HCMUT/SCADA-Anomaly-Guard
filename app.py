@@ -23,6 +23,7 @@ selected_model = render_sidebar()
 state = st.session_state
 is_running = state.get("is_monitoring", False)
 alert_count = len(state.get("anomaly_records", []))
+future_alert_count = len(state.get("future_risk_records", []))
 active_model = selected_model or state.get("selected_model", DEFAULT_MODEL)
 fleet_size = len(TARGET_TURBINES)
 
@@ -32,7 +33,7 @@ st.markdown(f"**{APP_DESCRIPTION}**")
 st.caption(
     f"Monitoring: {'Running' if is_running else 'Idle'}  |  "
     f"Active model: {active_model}  |  "
-    f"Session alerts: {alert_count}"
+    f"Session alerts: {alert_count + future_alert_count}"
 )
 
 st.divider()
@@ -53,7 +54,11 @@ with kpi2:
 with kpi3:
     st.metric(label="Active Model", value=active_model, delta=f"{len(AVAILABLE_MODELS)} available")
 with kpi4:
-    st.metric(label="Session Alerts", value=f"{alert_count}", delta="Logged anomalies")
+    st.metric(
+        label="Session Alerts",
+        value=f"{alert_count + future_alert_count}",
+        delta=f"{future_alert_count} future-risk",
+    )
 
 # ========================= QUICK ACCESS CARDS =========================
 st.subheader("Quick Access")
@@ -78,7 +83,7 @@ with row1_left:
 with row1_right:
     render_card(
         "Real-time Monitor",
-        "Watch live batches, compare model output, and inspect the current stream.",
+        "Watch raw online prediction with a separate legacy current-detection panel.",
         "pages/02_Real-time_Monitor.py",
         "Open monitor",
     )
