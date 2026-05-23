@@ -83,7 +83,7 @@ with row1_left:
 with row1_right:
     render_card(
         "Real-time Monitor",
-        "Watch raw online prediction with a separate legacy current-detection panel.",
+        "Monitor current fault detection alongside integrated future-risk prediction.",
         "pages/02_Real-time_Monitor.py",
         "Open monitor",
     )

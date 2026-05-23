@@ -1,0 +1,458 @@
+{
+  "window_hours": 24,
+  "classifier_models": [
+    {
+      "model_name": "lstm",
+      "train_shape": [
+        161062,
+        144,
+        21
+      ],
+      "val_shape": [
+        27346,
+        144,
+        21
+      ],
+      "test_shape": [
+        7126,
+        144,
+        21
+      ],
+      "hyperparameters": {
+        "learning_rate": 0.001,
+        "dropout_rate": null,
+        "l2_strength": 0.0,
+        "loss_name": "focal",
+        "focal_gamma": 2.0,
+        "focal_alpha": 0.75
+      },
+      "selected_threshold": 0.425,
+      "threshold_source": "validation_f1_sweep",
+      "validation_metrics": {
+        "threshold": 0.425,
+        "accuracy": 0.5152855993563958,
+        "precision": 0.16267134411745598,
+        "recall": 0.8724738675958188,
+        "f1": 0.27421562722444287,
+        "pr_auc": 0.17624362080007658,
+        "roc_auc": 0.6908105387172986,
+        "confusion_matrix": [
+          [
+            11587,
+            12889
+          ],
+          [
+            366,
+            2504
+          ]
+        ],
+        "support": 27346,
+        "positive_count": 2870,
+        "negative_count": 24476
+      },
+      "test_metrics": {
+        "threshold": 0.425,
+        "accuracy": 0.6895874263261297,
+        "precision": 0.5612341026848798,
+        "recall": 0.8722547584187409,
+        "f1": 0.6830037259959874,
+        "pr_auc": 0.7954177592222197,
+        "roc_auc": 0.8514189121196147,
+        "confusion_matrix": [
+          [
+            2531,
+            1863
+          ],
+          [
+            349,
+            2383
+          ]
+        ],
+        "support": 7126,
+        "positive_count": 2732,
+        "negative_count": 4394
+      },
+      "event_test_metrics": {
+        "threshold": 0.425,
+        "accuracy": 0.5909090909090909,
+        "precision": 0.5714285714285714,
+        "recall": 1.0,
+        "f1": 0.7272727272727273,
+        "pr_auc": 0.8220510426392781,
+        "roc_auc": 0.8,
+        "confusion_matrix": [
+          [
+            1,
+            9
+          ],
+          [
+            0,
+            12
+          ]
+        ],
+        "support": 22,
+        "positive_count": 12,
+        "negative_count": 10
+      },
+      "summary": {
+        "model_name": "lstm",
+        "threshold": 0.425,
+        "threshold_source": "validation_f1_sweep",
+        "accuracy": 0.6895874263261297,
+        "precision": 0.5612341026848798,
+        "recall": 0.8722547584187409,
+        "f1": 0.6830037259959874,
+        "pr_auc": 0.7954177592222197,
+        "roc_auc": 0.8514189121196147,
+        "event_precision": 0.5714285714285714,
+        "event_recall": 1.0,
+        "event_f1": 0.7272727272727273,
+        "event_count": 22
+      }
+    },
+    {
+      "model_name": "gru",
+      "train_shape": [
+        161062,
+        144,
+        21
+      ],
+      "val_shape": [
+        27346,
+        144,
+        21
+      ],
+      "test_shape": [
+        7126,
+        144,
+        21
+      ],
+      "hyperparameters": {
+        "learning_rate": 0.001,
+        "dropout_rate": null,
+        "l2_strength": 0.0,
+        "loss_name": "focal",
+        "focal_gamma": 2.0,
+        "focal_alpha": 0.75
+      },
+      "selected_threshold": 0.398,
+      "threshold_source": "validation_f1_sweep",
+      "validation_metrics": {
+        "threshold": 0.398,
+        "accuracy": 0.5583631975426022,
+        "precision": 0.17692469646992773,
+        "recall": 0.878397212543554,
+        "f1": 0.2945265494479818,
+        "pr_auc": 0.19780412958780752,
+        "roc_auc": 0.7162631473453622,
+        "confusion_matrix": [
+          [
+            12748,
+            11728
+          ],
+          [
+            349,
+            2521
+          ]
+        ],
+        "support": 27346,
+        "positive_count": 2870,
+        "negative_count": 24476
+      },
+      "test_metrics": {
+        "threshold": 0.398,
+        "accuracy": 0.7224249228178501,
+        "precision": 0.5976178146038322,
+        "recall": 0.8448023426061494,
+        "f1": 0.700030330603579,
+        "pr_auc": 0.7448881992387734,
+        "roc_auc": 0.8222051433106905,
+        "confusion_matrix": [
+          [
+            2840,
+            1554
+          ],
+          [
+            424,
+            2308
+          ]
+        ],
+        "support": 7126,
+        "positive_count": 2732,
+        "negative_count": 4394
+      },
+      "event_test_metrics": {
+        "threshold": 0.398,
+        "accuracy": 0.5909090909090909,
+        "precision": 0.5714285714285714,
+        "recall": 1.0,
+        "f1": 0.7272727272727273,
+        "pr_auc": 0.8499413780663782,
+        "roc_auc": 0.7749999999999999,
+        "confusion_matrix": [
+          [
+            1,
+            9
+          ],
+          [
+            0,
+            12
+          ]
+        ],
+        "support": 22,
+        "positive_count": 12,
+        "negative_count": 10
+      },
+      "summary": {
+        "model_name": "gru",
+        "threshold": 0.398,
+        "threshold_source": "validation_f1_sweep",
+        "accuracy": 0.7224249228178501,
+        "precision": 0.5976178146038322,
+        "recall": 0.8448023426061494,
+        "f1": 0.700030330603579,
+        "pr_auc": 0.7448881992387734,
+        "roc_auc": 0.8222051433106905,
+        "event_precision": 0.5714285714285714,
+        "event_recall": 1.0,
+        "event_f1": 0.7272727272727273,
+        "event_count": 22
+      }
+    },
+    {
+      "model_name": "cnn_lstm",
+      "train_shape": [
+        161062,
+        144,
+        21
+      ],
+      "val_shape": [
+        27346,
+        144,
+        21
+      ],
+      "test_shape": [
+        7126,
+        144,
+        21
+      ],
+      "hyperparameters": {
+        "learning_rate": 0.001,
+        "dropout_rate": null,
+        "l2_strength": 0.0,
+        "loss_name": "focal",
+        "focal_gamma": 2.0,
+        "focal_alpha": 0.75
+      },
+      "selected_threshold": 0.23700000000000002,
+      "threshold_source": "validation_f1_sweep",
+      "validation_metrics": {
+        "threshold": 0.23700000000000002,
+        "accuracy": 0.8394646383383311,
+        "precision": 0.3113207547169811,
+        "recall": 0.4369337979094077,
+        "f1": 0.36358364743403887,
+        "pr_auc": 0.28719727437283177,
+        "roc_auc": 0.7952043685829197,
+        "confusion_matrix": [
+          [
+            21702,
+            2774
+          ],
+          [
+            1616,
+            1254
+          ]
+        ],
+        "support": 27346,
+        "positive_count": 2870,
+        "negative_count": 24476
+      },
+      "test_metrics": {
+        "threshold": 0.23700000000000002,
+        "accuracy": 0.8271119842829077,
+        "precision": 0.9310344827586207,
+        "recall": 0.5929721815519766,
+        "f1": 0.7245080500894454,
+        "pr_auc": 0.8860211827678572,
+        "roc_auc": 0.9034829122768904,
+        "confusion_matrix": [
+          [
+            4274,
+            120
+          ],
+          [
+            1112,
+            1620
+          ]
+        ],
+        "support": 7126,
+        "positive_count": 2732,
+        "negative_count": 4394
+      },
+      "event_test_metrics": {
+        "threshold": 0.23700000000000002,
+        "accuracy": 0.7727272727272727,
+        "precision": 0.7333333333333333,
+        "recall": 0.9166666666666666,
+        "f1": 0.8148148148148148,
+        "pr_auc": 0.9404474610356964,
+        "roc_auc": 0.9166666666666666,
+        "confusion_matrix": [
+          [
+            6,
+            4
+          ],
+          [
+            1,
+            11
+          ]
+        ],
+        "support": 22,
+        "positive_count": 12,
+        "negative_count": 10
+      },
+      "summary": {
+        "model_name": "cnn_lstm",
+        "threshold": 0.23700000000000002,
+        "threshold_source": "validation_f1_sweep",
+        "accuracy": 0.8271119842829077,
+        "precision": 0.9310344827586207,
+        "recall": 0.5929721815519766,
+        "f1": 0.7245080500894454,
+        "pr_auc": 0.8860211827678572,
+        "roc_auc": 0.9034829122768904,
+        "event_precision": 0.7333333333333333,
+        "event_recall": 0.9166666666666666,
+        "event_f1": 0.8148148148148148,
+        "event_count": 22
+      }
+    },
+    {
+      "model_name": "cnn_gru",
+      "train_shape": [
+        161062,
+        144,
+        21
+      ],
+      "val_shape": [
+        27346,
+        144,
+        21
+      ],
+      "test_shape": [
+        7126,
+        144,
+        21
+      ],
+      "hyperparameters": {
+        "learning_rate": 0.001,
+        "dropout_rate": null,
+        "l2_strength": 0.0,
+        "loss_name": "focal",
+        "focal_gamma": 2.0,
+        "focal_alpha": 0.75
+      },
+      "selected_threshold": 0.335,
+      "threshold_source": "validation_f1_sweep",
+      "validation_metrics": {
+        "threshold": 0.335,
+        "accuracy": 0.8545308271776494,
+        "precision": 0.34863387978142074,
+        "recall": 0.4445993031358885,
+        "f1": 0.3908116385911179,
+        "pr_auc": 0.33596826559203224,
+        "roc_auc": 0.7983850495941982,
+        "confusion_matrix": [
+          [
+            22092,
+            2384
+          ],
+          [
+            1594,
+            1276
+          ]
+        ],
+        "support": 27346,
+        "positive_count": 2870,
+        "negative_count": 24476
+      },
+      "test_metrics": {
+        "threshold": 0.335,
+        "accuracy": 0.8133595284872298,
+        "precision": 0.9493589743589743,
+        "recall": 0.5420937042459737,
+        "f1": 0.690121155638397,
+        "pr_auc": 0.8828609547284034,
+        "roc_auc": 0.9076203924425092,
+        "confusion_matrix": [
+          [
+            4315,
+            79
+          ],
+          [
+            1251,
+            1481
+          ]
+        ],
+        "support": 7126,
+        "positive_count": 2732,
+        "negative_count": 4394
+      },
+      "event_test_metrics": {
+        "threshold": 0.335,
+        "accuracy": 0.7727272727272727,
+        "precision": 0.7692307692307693,
+        "recall": 0.8333333333333334,
+        "f1": 0.8,
+        "pr_auc": 0.9051857864357865,
+        "roc_auc": 0.8833333333333333,
+        "confusion_matrix": [
+          [
+            7,
+            3
+          ],
+          [
+            2,
+            10
+          ]
+        ],
+        "support": 22,
+        "positive_count": 12,
+        "negative_count": 10
+      },
+      "summary": {
+        "model_name": "cnn_gru",
+        "threshold": 0.335,
+        "threshold_source": "validation_f1_sweep",
+        "accuracy": 0.8133595284872298,
+        "precision": 0.9493589743589743,
+        "recall": 0.5420937042459737,
+        "f1": 0.690121155638397,
+        "pr_auc": 0.8828609547284034,
+        "roc_auc": 0.9076203924425092,
+        "event_precision": 0.7692307692307693,
+        "event_recall": 0.8333333333333334,
+        "event_f1": 0.8,
+        "event_count": 22
+      }
+    }
+  ],
+  "autoencoder_models": [],
+  "best_classifier": {
+    "model_name": "cnn_lstm",
+    "threshold": 0.23700000000000002,
+    "threshold_source": "validation_f1_sweep",
+    "accuracy": 0.8271119842829077,
+    "precision": 0.9310344827586207,
+    "recall": 0.5929721815519766,
+    "f1": 0.7245080500894454,
+    "pr_auc": 0.8860211827678572,
+    "roc_auc": 0.9034829122768904,
+    "event_precision": 0.7333333333333333,
+    "event_recall": 0.9166666666666666,
+    "event_f1": 0.8148148148148148,
+    "event_count": 22
+  },
+  "best_autoencoder": null
+}

@@ -30,11 +30,12 @@ from src.config import (
     AVAILABLE_MODELS,
     CHART_SENSOR_COLS,
     DEFAULT_TABLE_ROWS,
+    DETECTION_SCALER_DIR,
     DL_FORECAST_MODEL_PATHS,
     FEATURE_COLS,
-    LOCAL_PREDICTION_SCALER_DIR,
     MODEL_THRESHOLDS,
     PREDICTION_CLASSIFIER_EXPORT_DIR,
+    PREDICTION_SCALER_DIR,
     PREDICTION_WINDOW_STEPS,
     RF_FORECAST_MODEL_PATHS,
     RF_FORECAST_OPTIONS,
@@ -234,6 +235,12 @@ def validate_uploaded_csv(df):
 SEQUENCE_MODEL_NAMES = {"LSTM", "GRU", "CNN - LSTM", "CNN - GRU"}
 LIVE_INFERENCE_BATCH_SIZE = 1024
 DEFAULT_SEQUENCE_STRIDE_STEPS = 6
+DL_MODEL_INTERNAL_NAMES = {
+    "LSTM": "lstm",
+    "GRU": "gru",
+    "CNN - LSTM": "cnn_lstm",
+    "CNN - GRU": "cnn_gru",
+}
 
 
 @st.cache_resource(show_spinner=False)
@@ -412,6 +419,46 @@ def compute_live_metrics(y_true, scores, threshold):
     }
 
 
+def load_stored_dl_metrics(model_name: str, forecast_horizon: str):
+    """Load test metrics from the model's metrics.json (exact training test results)."""
+    horizon_paths = DL_FORECAST_MODEL_PATHS.get(model_name, {})
+    model_path = Path(horizon_paths.get(forecast_horizon, ""))
+    if not model_path.exists():
+        return None, None
+
+    metrics_path = model_path.parent / "metrics.json"
+    if not metrics_path.exists():
+        return None, None
+
+    try:
+        metrics_data = json.loads(metrics_path.read_text(encoding="utf-8"))
+        test_m = metrics_data.get("test_metrics", {})
+        if not test_m:
+            return None, None
+
+        threshold = float(metrics_data.get("selected_threshold", test_m.get("threshold", 0.5)))
+        result = {
+            "accuracy": float(test_m.get("accuracy", 0)),
+            "precision": float(test_m.get("precision", 0)),
+            "recall": float(test_m.get("recall", 0)),
+            "f1": float(test_m.get("f1", 0)),
+            "pr_auc": test_m.get("pr_auc"),
+            "roc_auc": test_m.get("roc_auc"),
+            "threshold": threshold,
+            "evaluated_samples": int(test_m.get("support", 0)),
+            "source": "stored_test_metrics",
+        }
+        details = {
+            "model_path": str(model_path),
+            "metrics_path": str(metrics_path),
+            "threshold": threshold,
+            "test_samples": int(test_m.get("support", 0)),
+        }
+        return result, details
+    except Exception:
+        return None, None
+
+
 def run_sequence_live_inference(df, model_name: str, forecast_horizon: str):
     horizon_paths = DL_FORECAST_MODEL_PATHS.get(model_name, {})
     model_path = Path(horizon_paths.get(forecast_horizon, ""))
@@ -443,6 +490,8 @@ def run_sequence_live_inference(df, model_name: str, forecast_horizon: str):
     stride_steps = max(1, int(metadata["stride_steps"]))
     threshold = float(MODEL_THRESHOLDS.get(model_name, {}).get(forecast_horizon, 0.5))
 
+    scaler_dir = DETECTION_SCALER_DIR if forecast_horizon == "Current" else PREDICTION_SCALER_DIR
+
     all_scores = []
     all_labels = []
     generated_windows = 0
@@ -452,7 +501,7 @@ def run_sequence_live_inference(df, model_name: str, forecast_horizon: str):
         if len(group) < window_steps:
             continue
 
-        scaler_path = LOCAL_PREDICTION_SCALER_DIR / f"asset_{asset_id}.pkl"
+        scaler_path = scaler_dir / f"asset_{asset_id}.pkl"
         if not scaler_path.exists():
             skipped_assets.append(asset_id)
             continue
@@ -485,7 +534,7 @@ def run_sequence_live_inference(df, model_name: str, forecast_horizon: str):
         "model_path": str(model_path),
         "threshold": threshold,
         "threshold_source": "MODEL_THRESHOLDS",
-        "scaler_dir": str(LOCAL_PREDICTION_SCALER_DIR),
+        "scaler_dir": str(scaler_dir),
         "feature_count": len(feature_cols),
         "window_steps": window_steps,
         "stride_steps": stride_steps,
@@ -495,6 +544,94 @@ def run_sequence_live_inference(df, model_name: str, forecast_horizon: str):
         "metadata_path": metadata.get("metadata_path", ""),
     }
     return metrics, details
+
+@st.cache_data(show_spinner=False)
+def _build_detection_test_arrays():
+    """Build (X, y) arrays from combined_dataset test split using detection scalers."""
+    from src.config import DETECTION_SCALER_DIR, TARGET_TURBINES
+    from pathlib import Path as _Path
+    import warnings as _w
+    _w.filterwarnings("ignore")
+
+    feature_cols = list(load_sequence_metadata_settings()["feature_cols"])
+    combined_path = _Path("D:/Final Project/scada-fault-prediction/Dataset/processed/combined_dataset_21_features.csv")
+    if not combined_path.exists():
+        raise FileNotFoundError(f"Combined dataset not found: {combined_path}")
+
+    df_all = pd.read_csv(combined_path)
+    test_df = df_all[df_all["train_test"] == "prediction"].copy()
+
+    window_steps = 144
+    stride_steps = 6
+    all_X, all_y = [], []
+
+    for asset_id in TARGET_TURBINES:
+        asset_df = (
+            test_df[test_df["asset_id"] == asset_id]
+            .sort_values("time_stamp")
+            .reset_index(drop=True)
+        )
+        if len(asset_df) < window_steps:
+            continue
+        scaler_path = DETECTION_SCALER_DIR / f"asset_{asset_id}.pkl"
+        if not scaler_path.exists():
+            continue
+        scaler = load_scaler_for_inference(str(scaler_path))
+        scaled = scaler.transform(
+            asset_df[feature_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0).to_numpy(dtype=np.float32)
+        )
+        labels = asset_df["label"].to_numpy()
+        end_indices = np.arange(window_steps - 1, len(asset_df), stride_steps, dtype=int)
+        for end_idx in end_indices:
+            all_X.append(scaled[end_idx - window_steps + 1 : end_idx + 1])
+            all_y.append(int(labels[end_idx]))
+
+    if not all_X:
+        raise ValueError("No detection test windows could be built")
+    return np.array(all_X, dtype=np.float32), np.array(all_y, dtype=int)
+
+
+def run_npy_inference_dl(model_name: str, forecast_horizon: str):
+    """Run inference on the training test arrays (npy) when no CSV is uploaded."""
+    horizon_paths = DL_FORECAST_MODEL_PATHS.get(model_name, {})
+    model_path = Path(horizon_paths.get(forecast_horizon, ""))
+    if not model_path.exists():
+        raise FileNotFoundError(f"Model file not found: {model_path}")
+
+    threshold = float(MODEL_THRESHOLDS.get(model_name, {}).get(forecast_horizon, 0.5))
+    model = load_keras_model_for_inference(str(model_path))
+
+    if forecast_horizon == "Current":
+        X, y = _build_detection_test_arrays()
+        data_source = "detection_test_split (combined_dataset)"
+    else:
+        X_path = PREDICTION_CLASSIFIER_EXPORT_DIR / "X_test.npy"
+        y_path = PREDICTION_CLASSIFIER_EXPORT_DIR / "y_test.npy"
+        if not X_path.exists() or not y_path.exists():
+            raise FileNotFoundError(f"NPY test files not found in {PREDICTION_CLASSIFIER_EXPORT_DIR}")
+        X = np.load(str(X_path))
+        y = np.load(str(y_path)).astype(int)
+        data_source = f"prediction_npy ({X_path.parent})"
+
+    all_scores = []
+    for i in range(0, len(X), LIVE_INFERENCE_BATCH_SIZE):
+        batch = X[i : i + LIVE_INFERENCE_BATCH_SIZE].astype(np.float32)
+        scores = np.asarray(model.predict(batch, verbose=0)).reshape(-1)
+        all_scores.extend(scores.tolist())
+
+    metrics = compute_live_metrics(y.tolist(), all_scores, threshold)
+    details = {
+        "model_path": str(model_path),
+        "threshold": threshold,
+        "feature_count": 21,
+        "window_steps": 144,
+        "stride_steps": 6,
+        "generated_windows": len(X),
+        "data_source": data_source,
+        "target_col": "label" if forecast_horizon == "Current" else "y_test.npy",
+    }
+    return metrics, details
+
 
 df_buffer = load_buffer()
 
@@ -538,12 +675,13 @@ with col2:
     )
 
 # ====================== PROCESS DATA ======================
+df = None
 if uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
-    
+
     if 'time_stamp' in df.columns:
         df['time_stamp'] = pd.to_datetime(df['time_stamp'])
-        
+
     valid_format, validation_message = validate_uploaded_csv(df)
     if not valid_format:
         st.error(validation_message)
@@ -551,67 +689,86 @@ if uploaded_file is not None:
 
     if 'asset_id' in df.columns and 'time_stamp' in df.columns:
         df = df.sort_values(by=['asset_id', 'time_stamp']).reset_index(drop=True)
-    
-    st.success(f"Loaded {len(df)} records from uploaded file")
 
+    st.success(f"Loaded {len(df)} records from uploaded file")
     st.subheader("Data Preview")
     st.dataframe(df.head(DEFAULT_TABLE_ROWS), use_container_width=True)
+else:
+    st.info(
+        "No CSV uploaded — DL models (LSTM, GRU, CNN-LSTM, CNN-GRU) will run on the "
+        "training test dataset (npy files). ML models require a CSV."
+    )
 
-    col_left, col_mid, col_right = st.columns([1, 0.5, 1])
-    with col_mid:
-        run_button = st.button("Run Prediction", type="primary", use_container_width=True)
-        
-    if run_button:
-        if not selected_models:
-            st.warning("Please select at least one model!")
-            st.stop()
+col_left, col_mid, col_right = st.columns([1, 0.5, 1])
+with col_mid:
+    run_button = st.button("Run Prediction", type="primary", use_container_width=True)
 
-        with st.spinner("Running live inference and loading saved performance fallback..."):
-            perf_path = Path("models") / "model_performance.json"
-            if perf_path.exists():
-                try:
-                    model_perf = json.loads(perf_path.read_text())
-                except Exception as e:
-                    st.error(f"Cannot read performance file: {e}")
-                    model_perf = {}
-            else:
-                st.warning("No saved performance file found at models/model_performance.json")
+if run_button:
+    if not selected_models:
+        st.warning("Please select at least one model!")
+        st.stop()
+
+    dl_models = [m for m in selected_models if m in SEQUENCE_MODEL_NAMES]
+    ml_models  = [m for m in selected_models if m not in SEQUENCE_MODEL_NAMES]
+
+    if df is None and ml_models:
+        st.warning(f"ML models ({', '.join(ml_models)}) require a CSV upload — skipping them.")
+
+    runnable = dl_models if df is None else selected_models
+    if not runnable:
+        st.warning("No models to run. Upload a CSV for ML models.")
+        st.stop()
+
+    with st.spinner("Running inference..."):
+        perf_path = Path("models") / "model_performance.json"
+        if perf_path.exists():
+            try:
+                model_perf = json.loads(perf_path.read_text())
+            except Exception as e:
+                st.error(f"Cannot read performance file: {e}")
                 model_perf = {}
+        else:
+            model_perf = {}
 
-            results = []
-            raw_metrics_for_plot = []
-            inference_details = {}
+        results = []
+        raw_metrics_for_plot = []
+        inference_details = {}
 
-            for model_name in selected_models:
-                display_model_name = model_name
-                if model_name in ["XGBoost", "Random Forest", "LSTM", "GRU", "CNN - LSTM", "CNN - GRU"]:
-                    display_model_name = f"{model_name} ({forecast_horizon})"
+        for model_name in runnable:
+            display_model_name = model_name
+            if model_name in ["XGBoost", "Random Forest", "LSTM", "GRU", "CNN - LSTM", "CNN - GRU"]:
+                display_model_name = f"{model_name} ({forecast_horizon})"
 
-                saved_perf_entry = model_perf.get(model_name, {}).get(forecast_horizon, {}) if model_perf else {}
-                perf_entry = dict(saved_perf_entry)
-                source_label = "saved_json" if saved_perf_entry else "unavailable"
+            saved_perf_entry = model_perf.get(model_name, {}).get(forecast_horizon, {}) if model_perf else {}
+            perf_entry = dict(saved_perf_entry)
+            source_label = "saved_json" if saved_perf_entry else "unavailable"
 
-                if model_name in SEQUENCE_MODEL_NAMES:
-                    try:
+            if model_name in SEQUENCE_MODEL_NAMES:
+                try:
+                    if df is not None:
                         live_entry, live_details = run_sequence_live_inference(df, model_name, forecast_horizon)
-                        perf_entry = live_entry
-                        source_label = "live_inference"
-                        inference_details[display_model_name] = {
-                            "status": "live_inference",
-                            **live_details,
-                        }
-                    except Exception as exc:
-                        inference_details[display_model_name] = {
-                            "status": "saved_json_fallback" if saved_perf_entry else "failed",
-                            "error": str(exc),
-                        }
-                        if saved_perf_entry:
-                            st.warning(
-                                f"Live inference failed for {display_model_name}; "
-                                f"showing saved JSON metrics instead. Error: {exc}"
-                            )
-                        else:
-                            st.error(f"Live inference failed for {display_model_name}: {exc}")
+                        status_key = "live_inference"
+                    else:
+                        live_entry, live_details = run_npy_inference_dl(model_name, forecast_horizon)
+                        status_key = "npy_inference"
+                    perf_entry = live_entry
+                    source_label = status_key
+                    inference_details[display_model_name] = {
+                        "status": status_key,
+                        **live_details,
+                    }
+                except Exception as exc:
+                    inference_details[display_model_name] = {
+                        "status": "saved_json_fallback" if saved_perf_entry else "failed",
+                        "error": str(exc),
+                    }
+                    if saved_perf_entry:
+                        st.warning(
+                            f"Inference failed for {display_model_name}; "
+                            f"showing saved JSON metrics instead. Error: {exc}"
+                        )
+                    else:
+                        st.error(f"Inference failed for {display_model_name}: {exc}")
 
                 def fmt(x):
                     return f"{x:.2f}" if isinstance(x, (int, float)) else (str(x) if x is not None and x != "" else "N/A")
@@ -683,11 +840,14 @@ if uploaded_file is not None:
                             return None
 
                     with c1:
-                        total_samples = len(df) if 'df' in locals() else "N/A"
-                        if isinstance(total_samples, int):
-                            total_samples_str = f"{total_samples:,}"
+                        inference_detail = inference_details.get(display_model_name)
+                        det_status = inference_detail.get("status") if inference_detail else None
+                        if det_status in ("live_inference", "npy_inference"):
+                            total_samples_str = f"{inference_detail.get('generated_windows', 0):,} windows"
+                        elif df is not None:
+                            total_samples_str = f"{len(df):,} rows"
                         else:
-                            total_samples_str = str(total_samples)
+                            total_samples_str = "N/A"
 
                         st.markdown(f"""
                             <div style="background-color: #1e293b; border-radius: 6px; padding: 6px 12px; margin-bottom: 8px; border-left: 4px solid #94a3b8;">
@@ -696,22 +856,30 @@ if uploaded_file is not None:
                             </div>
                         """, unsafe_allow_html=True)
 
-                        inference_detail = inference_details.get(display_model_name)
                         if inference_detail:
-                            if inference_detail.get("status") == "live_inference":
+                            status = inference_detail.get("status")
+                            if status == "live_inference":
                                 st.caption(
-                                    "Live inference: "
+                                    f"Live inference on uploaded CSV: "
                                     f"{model_row.get('Samples', 'N/A')} windows, "
                                     f"threshold {model_row.get('Threshold', 'N/A')}, "
                                     f"window {inference_detail.get('window_steps')} rows, "
                                     f"stride {inference_detail.get('stride_steps')}, "
                                     f"label `{inference_detail.get('target_col')}`."
                                 )
-                                st.caption(f"Model path: {inference_detail.get('model_path')}")
+                                st.caption(f"Model: {inference_detail.get('model_path')}")
+                            elif status == "npy_inference":
+                                st.caption(
+                                    f"Training test set inference: "
+                                    f"{inference_detail.get('generated_windows', 'N/A')} windows, "
+                                    f"threshold {inference_detail.get('threshold', 'N/A')}, "
+                                    f"source: {inference_detail.get('data_source', '')}."
+                                )
+                                st.caption(f"Model: {inference_detail.get('model_path')}")
                             else:
                                 st.caption(
                                     "Saved JSON fallback: "
-                                    f"{inference_detail.get('error', 'live inference unavailable')}"
+                                    f"{inference_detail.get('error', 'inference unavailable')}"
                                 )
                         
                         if model_row is not None:
@@ -858,5 +1026,3 @@ if uploaded_file is not None:
                     st.plotly_chart(fig_heatmap, use_container_width=True)
                 else:
                     st.warning("⚠️ Không tìm thấy các cột dữ liệu chỉ số (Metrics) tương ứng trong kết quả so sánh.")
-else:
-    st.info("Please upload a CSV file to start testing and comparison.")

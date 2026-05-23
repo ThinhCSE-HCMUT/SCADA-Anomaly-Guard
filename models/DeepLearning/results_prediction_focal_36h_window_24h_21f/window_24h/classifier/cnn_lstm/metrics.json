@@ -1,0 +1,109 @@
+{
+  "model_name": "cnn_lstm",
+  "train_shape": [
+    161062,
+    144,
+    21
+  ],
+  "val_shape": [
+    27346,
+    144,
+    21
+  ],
+  "test_shape": [
+    7126,
+    144,
+    21
+  ],
+  "hyperparameters": {
+    "learning_rate": 0.001,
+    "dropout_rate": null,
+    "l2_strength": 0.0,
+    "loss_name": "focal",
+    "focal_gamma": 2.0,
+    "focal_alpha": 0.75
+  },
+  "selected_threshold": 0.23700000000000002,
+  "threshold_source": "validation_f1_sweep",
+  "validation_metrics": {
+    "threshold": 0.23700000000000002,
+    "accuracy": 0.8394646383383311,
+    "precision": 0.3113207547169811,
+    "recall": 0.4369337979094077,
+    "f1": 0.36358364743403887,
+    "pr_auc": 0.28719727437283177,
+    "roc_auc": 0.7952043685829197,
+    "confusion_matrix": [
+      [
+        21702,
+        2774
+      ],
+      [
+        1616,
+        1254
+      ]
+    ],
+    "support": 27346,
+    "positive_count": 2870,
+    "negative_count": 24476
+  },
+  "test_metrics": {
+    "threshold": 0.23700000000000002,
+    "accuracy": 0.8271119842829077,
+    "precision": 0.9310344827586207,
+    "recall": 0.5929721815519766,
+    "f1": 0.7245080500894454,
+    "pr_auc": 0.8860211827678572,
+    "roc_auc": 0.9034829122768904,
+    "confusion_matrix": [
+      [
+        4274,
+        120
+      ],
+      [
+        1112,
+        1620
+      ]
+    ],
+    "support": 7126,
+    "positive_count": 2732,
+    "negative_count": 4394
+  },
+  "event_test_metrics": {
+    "threshold": 0.23700000000000002,
+    "accuracy": 0.7727272727272727,
+    "precision": 0.7333333333333333,
+    "recall": 0.9166666666666666,
+    "f1": 0.8148148148148148,
+    "pr_auc": 0.9404474610356964,
+    "roc_auc": 0.9166666666666666,
+    "confusion_matrix": [
+      [
+        6,
+        4
+      ],
+      [
+        1,
+        11
+      ]
+    ],
+    "support": 22,
+    "positive_count": 12,
+    "negative_count": 10
+  },
+  "summary": {
+    "model_name": "cnn_lstm",
+    "threshold": 0.23700000000000002,
+    "threshold_source": "validation_f1_sweep",
+    "accuracy": 0.8271119842829077,
+    "precision": 0.9310344827586207,
+    "recall": 0.5929721815519766,
+    "f1": 0.7245080500894454,
+    "pr_auc": 0.8860211827678572,
+    "roc_auc": 0.9034829122768904,
+    "event_precision": 0.7333333333333333,
+    "event_recall": 0.9166666666666666,
+    "event_f1": 0.8148148148148148,
+    "event_count": 22
+  }
+}

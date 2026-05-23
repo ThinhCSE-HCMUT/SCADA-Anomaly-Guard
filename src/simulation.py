@@ -9,7 +9,7 @@ from src.config import (
     TARGET_TURBINES,
     TURBINE_LABELS,
 )
-from src.data_loader import load_legacy_data, load_online_prediction_data, split_by_turbine
+from src.data_loader import load_current_detection_data, load_online_prediction_data, split_by_turbine
 from src.inference import predict_batch
 from src.model_manager import load_model
 from src.prediction import predict_future_risk_batch
@@ -30,33 +30,33 @@ def _trim_history(df: pd.DataFrame, rows_per_asset: int) -> pd.DataFrame:
     )
 
 
-def _run_legacy_detection_step() -> bool:
-    """Keep the old current-detection path on df_simulation.csv and 105 features."""
-    legacy_df = load_legacy_data()
-    if legacy_df.empty:
+def _run_current_detection_step() -> bool:
+    """Run the current-detection path on df_simulation.csv and 105 features."""
+    current_detection_df = load_current_detection_data()
+    if current_detection_df.empty:
         return False
 
-    legacy_dfs = split_by_turbine(legacy_df)
+    current_detection_dfs = split_by_turbine(current_detection_df)
     running_model = load_model(st.session_state.selected_model)
-    st.session_state.setdefault("legacy_turbine_steps", {tid: 0 for tid in TARGET_TURBINES})
-    st.session_state.setdefault("legacy_stream_done", {tid: False for tid in TARGET_TURBINES})
-    st.session_state.setdefault("legacy_history_data", pd.DataFrame())
+    st.session_state.setdefault("current_detection_turbine_steps", {tid: 0 for tid in TARGET_TURBINES})
+    st.session_state.setdefault("current_detection_stream_done", {tid: False for tid in TARGET_TURBINES})
+    st.session_state.setdefault("current_detection_history_data", pd.DataFrame())
     st.session_state.setdefault("anomaly_records", [])
 
     new_rows = []
     any_active = False
 
     for tid in TARGET_TURBINES:
-        if st.session_state.legacy_stream_done.get(tid, False):
+        if st.session_state.current_detection_stream_done.get(tid, False):
             continue
 
-        step = st.session_state.legacy_turbine_steps.get(tid, 0)
-        batch = legacy_dfs[tid].iloc[
+        step = st.session_state.current_detection_turbine_steps.get(tid, 0)
+        batch = current_detection_dfs[tid].iloc[
             step * SIMULATION_BATCH_SIZE : (step + 1) * SIMULATION_BATCH_SIZE
         ].copy()
 
         if batch.empty:
-            st.session_state.legacy_stream_done[tid] = True
+            st.session_state.current_detection_stream_done[tid] = True
             continue
 
         pred_labels, pred_probas = predict_batch(running_model, batch)
@@ -66,7 +66,7 @@ def _run_legacy_detection_step() -> bool:
 
         new_rows.append(batch)
         any_active = True
-        st.session_state.legacy_turbine_steps[tid] = step + 1
+        st.session_state.current_detection_turbine_steps[tid] = step + 1
 
         for _, row in batch[batch["pred_label"] == 1].iterrows():
             st.session_state.anomaly_records.append(
@@ -78,12 +78,12 @@ def _run_legacy_detection_step() -> bool:
             )
 
     if new_rows:
-        st.session_state.legacy_history_data = pd.concat(
-            [st.session_state.legacy_history_data, *new_rows],
+        st.session_state.current_detection_history_data = pd.concat(
+            [st.session_state.current_detection_history_data, *new_rows],
             ignore_index=True,
         )
-        st.session_state.legacy_history_data = _trim_history(
-            st.session_state.legacy_history_data,
+        st.session_state.current_detection_history_data = _trim_history(
+            st.session_state.current_detection_history_data,
             SIMULATION_MAX_HISTORY,
         )
 
@@ -91,7 +91,7 @@ def _run_legacy_detection_step() -> bool:
 
 
 def run_simulation_step():
-    """Run one dashboard tick for all-turbine DL prediction plus legacy detection."""
+    """Run one dashboard tick for all-turbine future prediction plus current detection."""
     prediction_df = load_online_prediction_data()
     if prediction_df.empty:
         st.session_state.is_monitoring = False
@@ -163,7 +163,7 @@ def run_simulation_step():
             max(SIMULATION_MAX_HISTORY, PREDICTION_WINDOW_STEPS + SIMULATION_BATCH_SIZE),
         )
 
-    _run_legacy_detection_step()
+    _run_current_detection_step()
 
     if not prediction_active and all(st.session_state.stream_done.values()):
         st.session_state.is_monitoring = False

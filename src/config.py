@@ -12,9 +12,11 @@ DATA_DIR         = ROOT_DIR / "data"
 MODELS_DIR       = ROOT_DIR / "models"
 ASSETS_DIR       = ROOT_DIR / "assets"
 
-# External training repo artifacts used for sequence prediction.
+# Local copied training-result artifacts used for sequence prediction.
+PREDICTION_RESULTS_ROOT = MODELS_DIR / "DeepLearning"
+
+# External training repo exports used for online feature metadata and scalers.
 TRAINING_REPO_DIR = Path(r"D:\Final Project\scada-fault-prediction")
-PREDICTION_RESULTS_ROOT = TRAINING_REPO_DIR / "results" / "New_results" / "New_results"
 PREDICTION_CLASSIFIER_EXPORT_DIR = (
     TRAINING_REPO_DIR
     / "Dataset"
@@ -23,9 +25,11 @@ PREDICTION_CLASSIFIER_EXPORT_DIR = (
     / "window_24h"
     / "classifier"
 )
+PREDICTION_SCALER_DIR = PREDICTION_CLASSIFIER_EXPORT_DIR / "scalers"
+DETECTION_SCALER_DIR  = MODELS_DIR / "DeepLearning" / "detection_scalers"
 
 # Data files
-# df_simulation.csv is the legacy flat-feature stream for ML current detection.
+# df_simulation.csv is the flat-feature stream for current fault detection.
 REALTIME_DATA_PATH = DATA_DIR / "df_simulation.csv"
 TEST_DATA_PATH     = DATA_DIR / "test_data.csv"
 SAMPLE_DATA_PATH   = DATA_DIR / "sample_data.csv"
@@ -39,44 +43,44 @@ RAW_PREDICTION_SPLIT = "prediction"
 AVAILABLE_MODELS = {
     "XGBoost"                      : "Baseline/XGBoost/xgb_model.pkl",
     "Random Forest"                : "Baseline/RandomForest/rf_model.pkl",
-    "LSTM"                         : "DeepLearning/LSTM/lstm_model.keras",
-    "GRU"                          : "DeepLearning/GRU/gru_model.keras",
-    "CNN - LSTM"                   : "DeepLearning/CNN_LSTM/cnn_lstm_hybrid_model.keras",
-    "CNN - GRU"                    : "DeepLearning/CNN_GRU/cnn_gru_hybrid_model.keras"
+    "LSTM"                         : "DeepLearning/results_detection_input_window_24h/window_24h/classifier/lstm/model.keras",
+    "GRU"                          : "DeepLearning/results_detection_input_window_24h/window_24h/classifier/gru/model.keras",
+    "CNN - LSTM"                   : "DeepLearning/results_detection_input_window_24h/window_24h/classifier/cnn_lstm/model.keras",
+    "CNN - GRU"                    : "DeepLearning/results_detection_input_window_24h/window_24h/classifier/cnn_gru/model.keras"
 }
 
 MODEL_THRESHOLDS = {
     "LSTM": {
-        "Current": 0.418,
-        "12h": 0.384,
-        "24h": 0.423,
-        "36h": 0.459,
-        "48h": 0.354,
-        "72h": 0.403
+        "Current": 0.353,
+        "12h": 0.405,
+        "24h": 0.410,
+        "36h": 0.425,
+        "48h": 0.439,
+        "72h": 0.422
     },
     "GRU": {
-        "Current": 0.495,
-        "12h": 0.382,
-        "24h": 0.166,
-        "36h": 0.321,
-        "48h": 0.528,
-        "72h": 0.391
+        "Current": 0.084,
+        "12h": 0.274,
+        "24h": 0.365,
+        "36h": 0.398,
+        "48h": 0.260,
+        "72h": 0.544
     },
     "CNN - LSTM": {
         "Current": 0.168,
-        "12h": 0.27,
-        "24h": 0.445,
-        "36h": 0.668,
-        "48h": 0.192,
-        "72h": 0.402
+        "12h": 0.377,
+        "24h": 0.313,
+        "36h": 0.237,
+        "48h": 0.471,
+        "72h": 0.317
     },
     "CNN - GRU": {
-        "Current": 0.333,
-        "12h": 0.357,
-        "24h": 0.364,
-        "36h": 0.545,
-        "48h": 0.22,
-        "72h": 0.365
+        "Current": 0.069,
+        "12h": 0.555,
+        "24h": 0.680,
+        "36h": 0.335,
+        "48h": 0.258,
+        "72h": 0.392
     }
 }
 
@@ -110,36 +114,36 @@ RF_FORECAST_MODEL_PATHS = {
 
 DL_FORECAST_OPTIONS = {
     "LSTM": {
-        "Current": "DeepLearning/LSTM/lstm_model.keras",
-        "12h": "DeepLearning/LSTM/lstm_model_12h.keras",
-        "24h": "DeepLearning/LSTM/lstm_model_24h.keras",
-        "36h": "DeepLearning/LSTM/lstm_model_36h.keras",
-        "48h": "DeepLearning/LSTM/lstm_model_48h.keras",
-        "72h": "DeepLearning/LSTM/lstm_model_72h.keras",
+        "Current": "DeepLearning/results_detection_input_window_24h/window_24h/classifier/lstm/model.keras",
+        "12h": "DeepLearning/results_prediction_focal_12h_window_24h_21f/window_24h/classifier/lstm/model.keras",
+        "24h": "DeepLearning/results_prediction_focal_24h_window_24h_21f/window_24h/classifier/lstm/model.keras",
+        "36h": "DeepLearning/results_prediction_focal_36h_window_24h_21f/window_24h/classifier/lstm/model.keras",
+        "48h": "DeepLearning/results_prediction_focal_48h_window_24h_21f/window_24h/classifier/lstm/model.keras",
+        "72h": "DeepLearning/results_prediction_focal_72h_window_24h_21f/window_24h/classifier/lstm/model.keras",
     },
     "GRU": {
-        "Current": "DeepLearning/GRU/gru_model.keras",
-        "12h": "DeepLearning/GRU/gru_model_12h.keras",
-        "24h": "DeepLearning/GRU/gru_model_24h.keras",
-        "36h": "DeepLearning/GRU/gru_model_36h.keras",
-        "48h": "DeepLearning/GRU/gru_model_48h.keras",
-        "72h": "DeepLearning/GRU/gru_model_72h.keras",
+        "Current": "DeepLearning/results_detection_input_window_24h/window_24h/classifier/gru/model.keras",
+        "12h": "DeepLearning/results_prediction_focal_12h_window_24h_21f/window_24h/classifier/gru/model.keras",
+        "24h": "DeepLearning/results_prediction_focal_24h_window_24h_21f/window_24h/classifier/gru/model.keras",
+        "36h": "DeepLearning/results_prediction_focal_36h_window_24h_21f/window_24h/classifier/gru/model.keras",
+        "48h": "DeepLearning/results_prediction_focal_48h_window_24h_21f/window_24h/classifier/gru/model.keras",
+        "72h": "DeepLearning/results_prediction_focal_72h_window_24h_21f/window_24h/classifier/gru/model.keras",
     },
     "CNN - LSTM": {
-        "Current": "DeepLearning/CNN_LSTM/cnn_lstm_hybrid_model.keras",
-        "12h": "DeepLearning/CNN_LSTM/cnn_lstm_hybrid_model_12h.keras",
-        "24h": "DeepLearning/CNN_LSTM/cnn_lstm_hybrid_model_24h.keras",
-        "36h": "DeepLearning/CNN_LSTM/cnn_lstm_hybrid_model_36h.keras",
-        "48h": "DeepLearning/CNN_LSTM/cnn_lstm_hybrid_model_48h.keras",
-        "72h": "DeepLearning/CNN_LSTM/cnn_lstm_hybrid_model_72h.keras",
+        "Current": "DeepLearning/results_detection_input_window_24h/window_24h/classifier/cnn_lstm/model.keras",
+        "12h": "DeepLearning/results_prediction_focal_12h_window_24h_21f/window_24h/classifier/cnn_lstm/model.keras",
+        "24h": "DeepLearning/results_prediction_focal_24h_window_24h_21f/window_24h/classifier/cnn_lstm/model.keras",
+        "36h": "DeepLearning/results_prediction_focal_36h_window_24h_21f/window_24h/classifier/cnn_lstm/model.keras",
+        "48h": "DeepLearning/results_prediction_focal_48h_window_24h_21f/window_24h/classifier/cnn_lstm/model.keras",
+        "72h": "DeepLearning/results_prediction_focal_72h_window_24h_21f/window_24h/classifier/cnn_lstm/model.keras",
     },
     "CNN - GRU": {
-        "Current": "DeepLearning/CNN_GRU/cnn_gru_hybrid_model.keras",
-        "12h": "DeepLearning/CNN_GRU/cnn_gru_hybrid_model_12h.keras",
-        "24h": "DeepLearning/CNN_GRU/cnn_gru_hybrid_model_24h.keras",
-        "36h": "DeepLearning/CNN_GRU/cnn_gru_hybrid_model_36h.keras",
-        "48h": "DeepLearning/CNN_GRU/cnn_gru_hybrid_model_48h.keras",
-        "72h": "DeepLearning/CNN_GRU/cnn_gru_hybrid_model_72h.keras",
+        "Current": "DeepLearning/results_detection_input_window_24h/window_24h/classifier/cnn_gru/model.keras",
+        "12h": "DeepLearning/results_prediction_focal_12h_window_24h_21f/window_24h/classifier/cnn_gru/model.keras",
+        "24h": "DeepLearning/results_prediction_focal_24h_window_24h_21f/window_24h/classifier/cnn_gru/model.keras",
+        "36h": "DeepLearning/results_prediction_focal_36h_window_24h_21f/window_24h/classifier/cnn_gru/model.keras",
+        "48h": "DeepLearning/results_prediction_focal_48h_window_24h_21f/window_24h/classifier/cnn_gru/model.keras",
+        "72h": "DeepLearning/results_prediction_focal_72h_window_24h_21f/window_24h/classifier/cnn_gru/model.keras",
     },
 }
 
@@ -152,11 +156,11 @@ DL_FORECAST_MODEL_PATHS = {
 }
 
 PREDICTION_HORIZON_RUNS = {
-    "12h": "sequence_training_pred_12h_window_24h",
-    "24h": "sequence_training_pred_24h_window_24h",
-    "36h": "sequence_training_pred_36h_window_24h",
-    "48h": "sequence_training_pred_48h_window_24h",
-    "72h": "sequence_training_pred_72h_window_24h",
+    "12h": "results_prediction_focal_12h_window_24h_21f",
+    "24h": "results_prediction_focal_24h_window_24h_21f",
+    "36h": "results_prediction_focal_36h_window_24h_21f",
+    "48h": "results_prediction_focal_48h_window_24h_21f",
+    "72h": "results_prediction_focal_72h_window_24h_21f",
 }
 
 DEFAULT_PREDICTION_MODEL_BY_HORIZON = {
@@ -170,7 +174,6 @@ DEFAULT_PREDICTION_MODEL_BY_HORIZON = {
 PREDICTION_HORIZONS = list(PREDICTION_HORIZON_RUNS.keys())
 DEFAULT_PREDICTION_HORIZON = "24h"
 PREDICTION_WINDOW_STEPS = 144
-LOCAL_PREDICTION_SCALER_DIR = MODELS_DIR / "DeepLearning" / "DL_scaler"
 
 # Full resolved paths — used by load_model()
 MODEL_PATHS = {
@@ -243,21 +246,29 @@ FEATURE_COLS = CHART_SENSOR_COLS + _ROLLING_COLS   # 21 + 84 = 105
 SENSOR_LABELS = {
     # ---- Aggregated base features (used in Real-time Monitor chart) ----
     'sensor_0_avg'          : 'Ambient Temp',
-    'sensor_5_avg_cos'      : 'Pitch angle cos',
-    'sensor_5_min_cos'      : 'Pitch angle cos',
-    'sensor_5_max_cos'      : 'Pitch angle cos',
-    'sensor_5_avg_sin'      : 'Pitch angle sin',
-    'sensor_5_min_sin'      : 'Pitch angle sin',
+    'sensor_1_avg_sin'      : 'Wind Direction Avg Sin',
+    'sensor_5_avg_cos'      : 'Pitch Angle Avg Cos',
+    'sensor_5_min_cos'      : 'Pitch Angle Min Cos',
+    'sensor_5_max_cos'      : 'Pitch Angle Max Cos',
+    'sensor_5_avg_sin'      : 'Pitch Angle Avg Sin',
+    'sensor_5_min_sin'      : 'Pitch Angle Min Sin',
     'sensor_43_avg'         : 'Nacelle Temp',
     'sensor_41_avg'         : 'Hydraulic Oil Temp',
     'sensor_14_avg'         : 'Gen Bearing Temp NDE',
+    'sensor_18_avg'         : 'Generator RPM',
+    'sensor_19_avg'         : 'Split Ring Chamber Temp',
+    'sensor_33_avg'         : 'Voltage Phase 2',
+    'sensor_34_avg'         : 'Voltage Phase 3',
     'sensor_52_max'         : 'Rotor RPM',
     'wind_speed_3_min'      : 'Wind Speed',
     'sensor_10_avg'         : 'Cooling Water Temp',
+    'reactive_power_28_min' : 'Inductive Reactive Power Min',
+    'reactive_power_28_max' : 'Inductive Reactive Power Max',
     'reactive_power_27_max' : 'Reactive Power cap',
     'sensor_47'             : 'Reactive Power Disconnected',
     'sensor_38_avg'         : 'HV Transformer Temp L1',
     'sensor_40_avg'         : 'HV Transformer Temp L3',
+    'sensor_42_avg_cos'     : 'Nacelle Direction Avg Cos',
     'power_30_std'          : 'Grid Active Power',
     # ---- Raw sensor names (used on other pages) ----
     "sensor_0"          : "Ambient Temperature",
@@ -337,13 +348,15 @@ SENSOR_UNITS = {
     # Angle / direction
     "sensor_5": "°", "sensor_1": "°", "sensor_2": "°", "sensor_42": "°",
     # RPM
-    "sensor_18": "rpm", "sensor_52": "rpm", "sensor_52_max": "rpm",
+    "sensor_18": "rpm", "sensor_18_avg": "rpm", "sensor_52": "rpm", "sensor_52_max": "rpm",
     # Power
     "power_29": "kW", "power_30": "kW", "power_30_std": "kW",
+    "sensor_44": "Wh",
+    "reactive_power_28_min": "kVAr", "reactive_power_28_max": "kVAr",
     # Current
     "sensor_23": "A", "sensor_24": "A", "sensor_25": "A",
     # Voltage
-    "sensor_32": "V", "sensor_33": "V", "sensor_34": "V",
+    "sensor_32": "V", "sensor_33": "V", "sensor_33_avg": "V", "sensor_34": "V", "sensor_34_avg": "V",
     # Frequency
     "sensor_26": "Hz",
 }

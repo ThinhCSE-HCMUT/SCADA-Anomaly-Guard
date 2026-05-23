@@ -15,7 +15,10 @@ def load_model(model_name: str):
         # Kiểm tra đuôi file để quyết định công cụ load
         if path.endswith(".keras") or path.endswith(".h5"):
             # Dùng Keras để load Deep Learning & Hybrid models
-            return keras_load_model(path)
+            try:
+                return keras_load_model(path, compile=False, safe_mode=False)
+            except TypeError:
+                return keras_load_model(path, compile=False)
         elif path.endswith(".pkl"):
             # Dùng Joblib để load Machine Learning models
             return joblib.load(path)

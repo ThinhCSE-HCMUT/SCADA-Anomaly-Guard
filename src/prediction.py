@@ -14,13 +14,10 @@ import streamlit as st
 
 from src.config import (
     DEFAULT_PREDICTION_HORIZON,
-    DEFAULT_PREDICTION_MODEL_BY_HORIZON,
-    DL_FORECAST_MODEL_PATHS,
-    LOCAL_PREDICTION_SCALER_DIR,
-    MODEL_THRESHOLDS,
     PREDICTION_CLASSIFIER_EXPORT_DIR,
     PREDICTION_HORIZON_RUNS,
     PREDICTION_RESULTS_ROOT,
+    PREDICTION_SCALER_DIR,
     PREDICTION_WINDOW_STEPS,
 )
 
@@ -58,35 +55,11 @@ def _feature_count_from_model(model_path: Path) -> int | None:
     return None
 
 
-def _local_prediction_artifact(horizon: str, reason: str = "") -> dict[str, Any]:
-    display_name = DEFAULT_PREDICTION_MODEL_BY_HORIZON.get(horizon, "CNN - LSTM")
-    horizon_paths = DL_FORECAST_MODEL_PATHS.get(display_name, {})
-    model_path = Path(horizon_paths.get(horizon, ""))
-    threshold = MODEL_THRESHOLDS.get(display_name, {}).get(horizon, 0.5)
-    model_name = MODEL_INTERNAL_NAMES.get(display_name, display_name.lower().replace(" - ", "_").replace(" ", "_"))
-
-    if not model_path.exists():
-        return {
-            "available": False,
-            "horizon": horizon,
-            "model_name": model_name,
-            "model_display_name": display_name,
-            "error": f"Compatible local prediction model not found: {model_path}",
-        }
-
-    return {
-        "available": True,
-        "horizon": horizon,
-        "run_name": "local_21_feature_forecast",
-        "model_name": model_name,
-        "model_display_name": display_name,
-        "model_path": str(model_path),
-        "threshold": float(threshold),
-        "threshold_source": "local_config",
-        "scaler_dir": str(LOCAL_PREDICTION_SCALER_DIR),
-        "artifact_source": "local_21_feature_model",
-        "fallback_reason": reason,
-    }
+def _window_steps_from_model(model_path: Path) -> int | None:
+    input_shape = _read_keras_input_shape(model_path)
+    if input_shape and len(input_shape) == 3:
+        return int(input_shape[-2])
+    return None
 
 
 @st.cache_data(show_spinner=False)
@@ -118,10 +91,12 @@ def load_prediction_registry() -> dict[str, dict[str, Any]]:
         comparison_path = classifier_dir / "model_comparison.csv"
 
         if not comparison_path.exists():
-            registry[horizon] = _local_prediction_artifact(
-                horizon,
-                f"External comparison not found: {comparison_path}",
-            )
+            registry[horizon] = {
+                "available": False,
+                "horizon": horizon,
+                "run_name": run_name,
+                "error": f"Prediction comparison not found: {comparison_path}",
+            }
             continue
 
         try:
@@ -135,20 +110,7 @@ def load_prediction_registry() -> dict[str, dict[str, Any]]:
             model_path = model_dir / "model.keras"
             threshold = float(best["threshold"])
             model_feature_count = _feature_count_from_model(model_path)
-
-            if (
-                expected_feature_count
-                and model_feature_count
-                and model_feature_count != expected_feature_count
-            ):
-                registry[horizon] = _local_prediction_artifact(
-                    horizon,
-                    (
-                        f"External {model_name} expects {model_feature_count} features; "
-                        f"online stream provides {expected_feature_count}."
-                    ),
-                )
-                continue
+            model_window_steps = _window_steps_from_model(model_path)
 
             registry[horizon] = {
                 "available": True,
@@ -161,8 +123,11 @@ def load_prediction_registry() -> dict[str, dict[str, Any]]:
                 "comparison_path": str(comparison_path),
                 "threshold": threshold,
                 "threshold_source": str(best.get("threshold_source", "")),
-                "scaler_dir": str(PREDICTION_CLASSIFIER_EXPORT_DIR / "scalers"),
-                "artifact_source": "external_results",
+                "scaler_dir": str(PREDICTION_SCALER_DIR),
+                "artifact_source": "local_training_results",
+                "model_feature_count": model_feature_count,
+                "feature_contract_count": expected_feature_count,
+                "model_window_steps": model_window_steps,
                 "f1": float(best.get("f1", np.nan)),
                 "precision": float(best.get("precision", np.nan)),
                 "recall": float(best.get("recall", np.nan)),
@@ -302,6 +267,28 @@ def predict_future_risk_batch(
 
     feature_cols = list(metadata.get("feature_cols") or [])
     window_steps = int(metadata.get("window_steps") or PREDICTION_WINDOW_STEPS)
+    model_feature_count = artifact.get("model_feature_count")
+    if model_feature_count and len(feature_cols) != int(model_feature_count):
+        return _empty_result(
+            batch_len,
+            selected_horizon,
+            (
+                f"Feature contract mismatch: model expects {int(model_feature_count)} "
+                f"features, online stream provides {len(feature_cols)}."
+            ),
+        )
+
+    model_window_steps = artifact.get("model_window_steps")
+    if model_window_steps and window_steps != int(model_window_steps):
+        return _empty_result(
+            batch_len,
+            selected_horizon,
+            (
+                f"Window mismatch: model expects {int(model_window_steps)} steps, "
+                f"online stream provides {window_steps}."
+            ),
+        )
+
     missing_features = [col for col in feature_cols if col not in batch.columns]
     if missing_features:
         msg = "Missing prediction features: " + ", ".join(missing_features[:5])

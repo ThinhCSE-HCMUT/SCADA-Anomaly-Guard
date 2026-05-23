@@ -56,8 +56,8 @@ def load_event_info() -> pd.DataFrame:
         return pd.DataFrame()
 
 
-@st.cache_data(show_spinner="Loading legacy detection data, please wait...")
-def load_legacy_data() -> pd.DataFrame:
+@st.cache_data(show_spinner="Loading current detection data, please wait...")
+def load_current_detection_data() -> pd.DataFrame:
     try:
         df = pd.read_csv(str(REALTIME_DATA_PATH))
         df['time_stamp'] = pd.to_datetime(df['time_stamp'])
@@ -68,9 +68,13 @@ def load_legacy_data() -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def load_legacy_data() -> pd.DataFrame:
+    return load_current_detection_data()
+
+
 def load_data() -> pd.DataFrame:
-    """Backward-compatible alias for the legacy flat-feature stream."""
-    return load_legacy_data()
+    """Backward-compatible alias for the current flat-feature stream."""
+    return load_current_detection_data()
 
 
 @st.cache_data(show_spinner="Loading raw Wind Farm A prediction rows, please wait...")

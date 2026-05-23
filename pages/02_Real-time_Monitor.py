@@ -35,6 +35,15 @@ from src.sidebar import render_sidebar
 from src.simulation import run_simulation_step
 
 
+DEFAULT_SELECTED_SENSORS = [
+    "sensor_0_avg",
+    "sensor_10_avg",
+    "wind_speed_3_min",
+    "sensor_41_avg",
+    "sensor_18_avg",
+]
+
+
 def add_system_log(event_message: str) -> None:
     if "system_logs" not in st.session_state:
         st.session_state.system_logs = []
@@ -48,13 +57,13 @@ def _init_state() -> None:
         "turbine_steps": {tid: 0 for tid in TARGET_TURBINES},
         "stream_done": {tid: False for tid in TARGET_TURBINES},
         "history_data": pd.DataFrame(),
-        "legacy_history_data": pd.DataFrame(),
+        "current_detection_history_data": pd.DataFrame(),
         "anomaly_records": [],
         "future_risk_records": [],
         "selected_model": next(iter(AVAILABLE_MODELS)),
         "prediction_horizon": DEFAULT_PREDICTION_HORIZON,
-        "legacy_turbine_steps": {tid: 0 for tid in TARGET_TURBINES},
-        "legacy_stream_done": {tid: False for tid in TARGET_TURBINES},
+        "current_detection_turbine_steps": {tid: 0 for tid in TARGET_TURBINES},
+        "current_detection_stream_done": {tid: False for tid in TARGET_TURBINES},
         "system_logs": [
             {
                 "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -89,13 +98,42 @@ def _fault_ranges(df: pd.DataFrame) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
     return ranges
 
 
+def _format_percent_score(score: float) -> str:
+    return f"{float(score) * 100:.1f}%"
+
+
+def _format_threshold_delta(threshold: float) -> str:
+    if pd.notna(threshold):
+        return f"Threshold {_format_percent_score(threshold)}"
+    return "Ready"
+
+
+def _chart_revision(df: pd.DataFrame) -> str:
+    if df.empty:
+        return "empty"
+    latest_time = df["time_stamp"].iloc[-1] if "time_stamp" in df.columns else ""
+    return f"{len(df)}-{latest_time}"
+
+
+def _render_live_chart(fig: go.Figure, chart_key: str) -> None:
+    chart_config = {
+        "displayModeBar": False,
+        "responsive": True,
+        "scrollZoom": False,
+    }
+    try:
+        st.plotly_chart(fig, use_container_width=True, key=chart_key, config=chart_config)
+    except TypeError:
+        st.plotly_chart(fig, use_container_width=True, config=chart_config)
+
+
 _init_state()
 raw_df = load_online_prediction_data()
 
 render_sidebar()
 
 st.title("Real-time Monitor")
-st.markdown("All-turbine monitoring with legacy 105-feature detection and DL future-risk prediction.")
+st.markdown("All-turbine monitoring with current fault detection and DL future-risk prediction.")
 st.divider()
 
 col1, col2, col3, col4 = st.columns([1.1, 2.3, 1.2, 1.1])
@@ -108,19 +146,20 @@ with col1:
     selected_asset = int(selected_label.split("-")[1])
 
 with col2:
+    default_sensors = [col for col in DEFAULT_SELECTED_SENSORS if col in CHART_SENSOR_COLS]
     chosen_sensors = st.multiselect(
         "Choose Sensors to display",
         options=CHART_SENSOR_COLS,
-        default=CHART_SENSOR_COLS[:5],
+        default=default_sensors,
         format_func=get_sensor_label,
         max_selections=10,
     )
     if not chosen_sensors:
-        chosen_sensors = CHART_SENSOR_COLS[:4]
+        chosen_sensors = default_sensors
 
 with col3:
     model_choice = st.selectbox(
-        "Legacy Detection Model (105 features)",
+        "Current Detection Model (ML/DL)",
         options=list(AVAILABLE_MODELS.keys()),
         disabled=st.session_state.is_monitoring,
     )
@@ -128,7 +167,7 @@ with col3:
     if active_model is not None:
         st.caption(f"Model loaded: **{model_choice}**")
     else:
-        st.caption("Model unavailable; legacy detection uses fallback labels.")
+        st.caption("Model unavailable; current detection uses fallback labels.")
 
 with col4:
     current_horizon = st.session_state.get("prediction_horizon", DEFAULT_PREDICTION_HORIZON)
@@ -142,14 +181,16 @@ with col4:
     prediction_artifact = get_prediction_artifact(prediction_horizon)
     if prediction_artifact.get("available"):
         artifact_source = prediction_artifact.get("artifact_source", "")
-        source_label = "local 21-feature" if artifact_source == "local_21_feature_model" else "external"
+        source_labels = {
+            "local_training_results": "local training result",
+            "external_results": "external training result",
+            "local_21_feature_model": "local 21-feature",
+        }
+        source_label = source_labels.get(artifact_source, artifact_source or "unknown")
         st.caption(
-            f"Best model: **{prediction_artifact['model_display_name']}** "
+            f"Best trained model: **{prediction_artifact['model_display_name']}** "
             f"@ {prediction_artifact['threshold']:.3f} ({source_label})"
         )
-        fallback_reason = prediction_artifact.get("fallback_reason")
-        if fallback_reason:
-            st.caption(fallback_reason)
     else:
         st.caption("Prediction model unavailable")
 
@@ -173,7 +214,7 @@ with col_stop:
 if start_clicked:
     add_system_log(
         f"Simulation STARTED for all target turbines; "
-        f"legacy model: {model_choice}; prediction horizon: {prediction_horizon}"
+        f"current detection model: {model_choice}; prediction horizon: {prediction_horizon}"
     )
     st.session_state.update(
         {
@@ -181,13 +222,13 @@ if start_clicked:
             "turbine_steps": {tid: 0 for tid in TARGET_TURBINES},
             "stream_done": {tid: False for tid in TARGET_TURBINES},
             "history_data": pd.DataFrame(),
-            "legacy_history_data": pd.DataFrame(),
+            "current_detection_history_data": pd.DataFrame(),
             "anomaly_records": [],
             "future_risk_records": [],
             "selected_model": model_choice,
             "prediction_horizon": prediction_horizon,
-            "legacy_turbine_steps": {tid: 0 for tid in TARGET_TURBINES},
-            "legacy_stream_done": {tid: False for tid in TARGET_TURBINES},
+            "current_detection_turbine_steps": {tid: 0 for tid in TARGET_TURBINES},
+            "current_detection_stream_done": {tid: False for tid in TARGET_TURBINES},
         }
     )
     st.rerun()
@@ -226,7 +267,7 @@ if st.session_state.is_monitoring:
         add_system_log("No online prediction data found")
 
 history = st.session_state.history_data
-legacy_history = st.session_state.get("legacy_history_data", pd.DataFrame())
+current_detection_history = st.session_state.get("current_detection_history_data", pd.DataFrame())
 current_data = (
     history[history["asset_id"].eq(selected_asset)].copy()
     if not history.empty
@@ -245,6 +286,7 @@ if not current_data.empty:
     risk_status = latest.get("future_prediction_status", "Pending")
     risk_model = latest.get("future_model", "")
     risk_horizon = latest.get("future_horizon", st.session_state.get("prediction_horizon", DEFAULT_PREDICTION_HORIZON))
+    risk_threshold = latest.get("future_threshold", float("nan"))
     future_alerts_selected = sum(
         record["turbine"] == TURBINE_LABELS[selected_asset]
         for record in st.session_state.get("future_risk_records", [])
@@ -259,13 +301,13 @@ if not current_data.empty:
     p1, p2, p3, p4 = st.columns(4)
     if pd.notna(risk_score):
         p1.metric(
-            f"{risk_horizon} future risk",
-            "HIGH RISK" if risk_label else "LOW RISK",
-            delta=f"Score: {float(risk_score):.3f}",
+            f"{risk_horizon} future score",
+            _format_percent_score(risk_score),
+            delta=_format_threshold_delta(risk_threshold),
             delta_color="inverse" if risk_label else "normal",
         )
     else:
-        p1.metric(f"{risk_horizon} future risk", "Pending", delta=str(risk_status), delta_color="off")
+        p1.metric(f"{risk_horizon} future score", "PENDING", delta=str(risk_status), delta_color="off")
     p2.metric("Prediction Model", risk_model if risk_model else "Unavailable")
     p3.metric(f"Future Alerts {TURBINE_LABELS[selected_asset]}", future_alerts_selected)
     p4.metric("Future Alerts (all WT)", len(st.session_state.get("future_risk_records", [])))
@@ -291,14 +333,24 @@ for index, tid in enumerate(TARGET_TURBINES):
 
     last = sub.iloc[-1]
     is_high_risk = int(last.get("future_risk_label", 0)) == 1
+    risk_score = last.get("future_risk_score", float("nan"))
+    risk_status = last.get("future_prediction_status", "Pending")
     n_risk = int(sub["future_risk_label"].sum()) if "future_risk_label" in sub.columns else 0
     pct = (n_risk / len(sub) * 100) if len(sub) > 0 else 0
-    ov_cols[index].metric(
-        label=TURBINE_LABELS[tid],
-        value="HIGH RISK" if is_high_risk else "LOW/PENDING",
-        delta=f"{n_risk} future alerts ({pct:.0f}%)",
-        delta_color="inverse" if is_high_risk else "normal",
-    )
+    if pd.notna(risk_score):
+        ov_cols[index].metric(
+            label=TURBINE_LABELS[tid],
+            value=_format_percent_score(risk_score),
+            delta=f"{n_risk} future alerts ({pct:.0f}%)",
+            delta_color="inverse" if is_high_risk else "normal",
+        )
+    else:
+        ov_cols[index].metric(
+            label=TURBINE_LABELS[tid],
+            value="PENDING",
+            delta=str(risk_status),
+            delta_color="off",
+        )
 
 st.divider()
 
@@ -322,48 +374,53 @@ for index, tid in enumerate(TARGET_TURBINES):
     risk_label = int(last.get("future_risk_label", 0)) == 1
     risk_horizon = last.get("future_horizon", st.session_state.get("prediction_horizon", DEFAULT_PREDICTION_HORIZON))
     risk_status = last.get("future_prediction_status", "Pending")
+    risk_threshold = last.get("future_threshold", float("nan"))
 
     if pd.notna(risk_score):
         risk_cols[index].metric(
             label=f"{TURBINE_LABELS[tid]} {risk_horizon}",
-            value="HIGH RISK" if risk_label else "LOW RISK",
-            delta=f"Score {float(risk_score):.3f}",
+            value=_format_percent_score(risk_score),
+            delta=_format_threshold_delta(risk_threshold),
             delta_color="inverse" if risk_label else "normal",
         )
     else:
         risk_cols[index].metric(
             label=f"{TURBINE_LABELS[tid]} {risk_horizon}",
-            value="Pending",
+            value="PENDING",
             delta=str(risk_status),
             delta_color="off",
         )
 
 st.divider()
 
-st.subheader("Legacy Current Detection")
-st.caption("This panel keeps the old ML/current-detection path on df_simulation.csv with 105 features.")
+st.subheader("Current Fault Detection")
+st.caption("ML and DL current-detection models run on df_simulation.csv with 105 features.")
 
-legacy_cols = st.columns(5)
+current_detection_cols = st.columns(5)
 for index, tid in enumerate(TARGET_TURBINES):
-    sub = legacy_history[legacy_history["asset_id"].eq(tid)].copy() if not legacy_history.empty else pd.DataFrame()
+    sub = (
+        current_detection_history[current_detection_history["asset_id"].eq(tid)].copy()
+        if not current_detection_history.empty
+        else pd.DataFrame()
+    )
 
     if sub.empty:
-        legacy_cols[index].metric(
+        current_detection_cols[index].metric(
             label=TURBINE_LABELS[tid],
             value="Waiting",
-            delta=f"Step {st.session_state.get('legacy_turbine_steps', {}).get(tid, 0)}",
+            delta=f"Step {st.session_state.get('current_detection_turbine_steps', {}).get(tid, 0)}",
             delta_color="off",
         )
         continue
 
     last = sub.iloc[-1]
-    is_legacy_anom = int(last.get("pred_label", 0)) == 1
-    legacy_score = float(last.get("anomaly_score", 0.0))
-    legacy_cols[index].metric(
+    is_current_anom = int(last.get("pred_label", 0)) == 1
+    current_detection_score = float(last.get("anomaly_score", 0.0))
+    current_detection_cols[index].metric(
         label=TURBINE_LABELS[tid],
-        value="ANOMALY" if is_legacy_anom else "NORMAL",
-        delta=f"Score {legacy_score:.3f}",
-        delta_color="inverse" if is_legacy_anom else "normal",
+        value="ANOMALY" if is_current_anom else "NORMAL",
+        delta=f"Score {current_detection_score:.3f}",
+        delta_color="inverse" if is_current_anom else "normal",
     )
 
 st.divider()
@@ -473,11 +530,17 @@ if not current_data.empty and chosen_sensors:
             hovermode="x unified",
             margin=dict(l=60, r=20, t=35, b=40),
             legend=dict(orientation="h", y=1.01, yanchor="bottom", x=1, xanchor="right", font_size=11),
+            transition=dict(duration=0),
+        )
+        chart_key = f"live_sensor_trends_{selected_asset}_{'_'.join(valid_sensors)}"
+        fig.update_layout(
+            uirevision=chart_key,
+            datarevision=_chart_revision(cd),
         )
         fig.update_xaxes(showgrid=True, gridcolor="rgba(255,255,255,0.07)", tickformat="%m/%d %H:%M", tickangle=-30)
         fig.update_yaxes(showgrid=True, gridcolor="rgba(255,255,255,0.07)")
 
-        st.plotly_chart(fig, use_container_width=True)
+        _render_live_chart(fig, chart_key)
 
         total = len(cd)
         n_risk = int(cd["future_risk_label"].sum()) if "future_risk_label" in cd.columns else 0
@@ -494,7 +557,7 @@ else:
 st.divider()
 
 if st.session_state.anomaly_records:
-    st.subheader("Legacy Current Detection Log")
+    st.subheader("Current Fault Detection Log")
     log_df = (
         pd.DataFrame(st.session_state.anomaly_records)
         .sort_values("time", ascending=False)

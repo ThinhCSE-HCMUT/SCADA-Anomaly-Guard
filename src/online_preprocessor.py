@@ -108,7 +108,7 @@ def prepare_raw_prediction_frame(
     raw_df: pd.DataFrame,
     feature_cols: list[str] | None = None,
 ) -> pd.DataFrame:
-    """Convert raw CARE rows into the 21-feature online prediction frame."""
+    """Convert raw CARE rows into the configured online prediction frame."""
     feature_cols = list(feature_cols or load_online_feature_contract())
     if raw_df.empty:
         return pd.DataFrame(columns=["time_stamp", "asset_id", *feature_cols])
