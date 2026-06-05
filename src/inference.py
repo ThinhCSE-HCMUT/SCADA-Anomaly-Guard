@@ -31,12 +31,11 @@ def predict_batch(model, batch: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
     try:
         if hasattr(model, 'predict_proba'):
             pred_probas = model.predict_proba(X)[:, 1]
-            pred_labels = model.predict(X).astype(int)
+            pred_labels = (pred_probas >= 0.65).astype(int)
         else:
             raw_pred = np.asarray(model.predict(X)).reshape(-1)
             pred_probas = raw_pred.astype(float)
-            pred_labels = (pred_probas >= 0.5).astype(int)
+            pred_labels = (pred_probas >= 0.65).astype(int)
     except Exception:
         return _fallback_from_labels(batch)
-
     return pred_labels, pred_probas

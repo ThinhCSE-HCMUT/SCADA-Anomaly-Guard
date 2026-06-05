@@ -1,0 +1,66 @@
+{
+  "source_csv": "Dataset\\processed\\combined_dataset.csv",
+  "window_hours": 24,
+  "window_steps": 144,
+  "stride_steps": 6,
+  "prediction_horizon_steps": 72,
+  "label_definition": "future_horizon_any_positive_after_input_window",
+  "validation_source": "train_tail",
+  "prediction_val_ratio": 0.5,
+  "scaler_type": "minmax",
+  "feature_cols": [
+    "sensor_0_avg",
+    "sensor_5_avg_sin",
+    "sensor_5_avg_cos",
+    "sensor_5_min_sin",
+    "sensor_5_min_cos",
+    "sensor_5_max_cos",
+    "sensor_1_avg_sin",
+    "sensor_10_avg",
+    "sensor_14_avg",
+    "sensor_18_avg",
+    "sensor_19_avg",
+    "sensor_33_avg",
+    "sensor_34_avg",
+    "sensor_38_avg",
+    "sensor_40_avg",
+    "sensor_41_avg",
+    "sensor_42_avg_cos",
+    "sensor_44",
+    "reactive_power_28_min",
+    "reactive_power_28_max",
+    "wind_speed_3_min"
+  ],
+  "train_shape": [
+    161590,
+    144,
+    21
+  ],
+  "val_shape": [
+    27874,
+    144,
+    21
+  ],
+  "test_shape": [
+    7654,
+    144,
+    21
+  ],
+  "class_counts": {
+    "train": {
+      "negative": 144399,
+      "positive": 17191,
+      "total": 161590
+    },
+    "val": {
+      "negative": 24507,
+      "positive": 3367,
+      "total": 27874
+    },
+    "test": {
+      "negative": 3990,
+      "positive": 3664,
+      "total": 7654
+    }
+  }
+}

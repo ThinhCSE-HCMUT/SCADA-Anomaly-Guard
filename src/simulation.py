@@ -104,6 +104,15 @@ def run_simulation_step():
     st.session_state.setdefault("history_data", pd.DataFrame())
     st.session_state.setdefault("future_risk_records", [])
 
+    # FIX: Chạy current detection TRƯỚC để current_detection_history_data đã có kết quả
+    # của tick hiện tại khi vòng lặp prediction bên dưới cố merge pred_label vào batch.
+    # Trước đây _run_current_detection_step() được gọi SAU vòng lặp → pred_label luôn
+    # lệch 1 tick (merge chỉ thấy kết quả batch N-1 chứ không phải batch N).
+    _run_current_detection_step()
+
+    # 🌟 BƯỚC 1: Lấy artifact cấu hình chuẩn (đường dẫn chuẩn + threshold động) từ UI lưu trong Session State
+    active_artifact = st.session_state.get("active_prediction_artifact", None)
+
     new_rows = []
     prediction_active = False
 
@@ -120,19 +129,92 @@ def run_simulation_step():
             st.session_state.stream_done[tid] = True
             continue
 
+        # 🌟 BƯỚC 2: Truyền thêm tham số 'artifact=active_artifact' vào hàm dưới đây
         future_risk = predict_future_risk_batch(
-            tid,
-            st.session_state.history_data,
-            batch,
-            prediction_horizon,
+            asset_id=tid,
+            history=st.session_state.history_data,
+            batch=batch,
+            horizon=prediction_horizon,
+            artifact=active_artifact,  # <-- Thêm dòng này để ép backend dùng cấu hình từ UI
         )
+        
         batch["future_risk_score"] = future_risk["scores"]
         batch["future_risk_label"] = future_risk["labels"]
         batch["future_prediction_status"] = future_risk["statuses"]
         batch["future_horizon"] = future_risk["horizon"]
         batch["future_model"] = future_risk["model_name"]
         batch["future_threshold"] = future_risk["threshold"]
+        
+        current_det = st.session_state.get("current_detection_history_data", pd.DataFrame())
+        if not current_det.empty:
+            tid_current = current_det[
+                pd.to_numeric(current_det["asset_id"], errors="coerce").fillna(-1).astype(int) == tid
+            ].copy()
+            
+            if not tid_current.empty:
+                # First try to map by `sequence_id` (stable across datasets)
+                if "sequence_id" in batch.columns and "sequence_id" in tid_current.columns:
+                    merge_cols = [c for c in ("sequence_id", "pred_label", "anomaly_score") if c in tid_current.columns]
+                    if "pred_label" in tid_current.columns:
+                        left = batch
+                        right = tid_current[[c for c in ("sequence_id", "pred_label", "anomaly_score") if c in tid_current.columns]]
+                        # perform left merge on sequence_id
+                        batch = pd.merge(left, right, on="sequence_id", how="left", suffixes=(None, "_det"))
+                        # normalize columns: prefer detection values from `tid_current`
+                        # If merge produced *_det columns, use them; otherwise if `pred_label`/`anomaly_score`
+                        # exist (coming from right-side selection), keep them. Only default when missing.
+                        if "pred_label_det" in batch.columns:
+                            batch["pred_label"] = batch["pred_label_det"].fillna(0).astype(int)
+                            batch.drop(columns=["pred_label_det"], inplace=True)
+                        elif "pred_label" in batch.columns:
+                            # keep existing pred_label (likely from right-side join)
+                            batch["pred_label"] = pd.to_numeric(batch["pred_label"], errors="coerce").fillna(0).astype(int)
+                        else:
+                            batch["pred_label"] = 0
 
+                        if "anomaly_score_det" in batch.columns:
+                            batch["anomaly_score"] = batch["anomaly_score_det"].fillna(0.0).astype(float)
+                            batch.drop(columns=["anomaly_score_det"], inplace=True)
+                        elif "anomaly_score" in batch.columns:
+                            batch["anomaly_score"] = pd.to_numeric(batch["anomaly_score"], errors="coerce").fillna(0.0).astype(float)
+                        else:
+                            batch["anomaly_score"] = 0.0
+
+                        # If mapping by sequence_id produced no anomalies, fall back to timestamp nearest join for leftovers
+                        unmapped_mask = (~batch["pred_label"].astype(bool))
+                    else:
+                        # No pred_label in detection data; initialize defaults
+                        batch["pred_label"] = 0
+                        batch["anomaly_score"] = 0.0
+                        unmapped_mask = pd.Series([True] * len(batch), index=batch.index)
+                else:
+                    # No sequence_id available — mark all as unmapped and fallback to time mapping
+                    batch["pred_label"] = 0
+                    batch["anomaly_score"] = 0.0
+                    unmapped_mask = pd.Series([True] * len(batch), index=batch.index)
+
+                # For any rows still unmapped, try nearest-time matching within 60s
+                try:
+                    batch_ts = pd.to_datetime(batch.loc[unmapped_mask, "time_stamp"]).reset_index()
+                    curr_ts = pd.to_datetime(tid_current["time_stamp"])
+                    # build time-indexed mapping
+                    pred_map = {pd.to_datetime(r["time_stamp"]): (int(r.get("pred_label", 0)), float(r.get("anomaly_score", 0.0))) for _, r in tid_current.iterrows()}
+                    for idx_row in batch_ts.itertuples(index=False):
+                        i = idx_row["index"]
+                        ts = pd.to_datetime(idx_row["time_stamp"]) if "time_stamp" in idx_row._fields else pd.to_datetime(idx_row[1])
+                        if ts in pred_map:
+                            batch.loc[i, "pred_label"] = pred_map[ts][0]
+                            batch.loc[i, "anomaly_score"] = pred_map[ts][1]
+                        else:
+                            # find nearest timestamp within tolerance
+                            nearest_ts = min(pred_map.keys(), key=lambda x: abs((x - ts).total_seconds()))
+                            if abs((nearest_ts - ts).total_seconds()) <= 60:
+                                batch.loc[i, "pred_label"] = pred_map[nearest_ts][0]
+                                batch.loc[i, "anomaly_score"] = pred_map[nearest_ts][1]
+                except Exception:
+                    # if anything fails, keep defaults
+                    pass
+        
         new_rows.append(batch)
         prediction_active = True
         st.session_state.turbine_steps[tid] = step + 1
@@ -162,8 +244,6 @@ def run_simulation_step():
             st.session_state.history_data,
             max(SIMULATION_MAX_HISTORY, PREDICTION_WINDOW_STEPS + SIMULATION_BATCH_SIZE),
         )
-
-    _run_current_detection_step()
 
     if not prediction_active and all(st.session_state.stream_done.values()):
         st.session_state.is_monitoring = False

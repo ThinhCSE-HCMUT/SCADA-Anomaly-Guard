@@ -21,6 +21,10 @@ from src.config import (
     PREDICTION_WINDOW_STEPS,
 )
 
+from src.model_manager import load_model
+
+
+
 
 MODEL_DISPLAY_NAMES = {
     "lstm": "LSTM",
@@ -64,7 +68,7 @@ def _window_steps_from_model(model_path: Path) -> int | None:
 
 @st.cache_data(show_spinner=False)
 def load_prediction_metadata() -> dict[str, Any]:
-    metadata_path = PREDICTION_CLASSIFIER_EXPORT_DIR / "metadata.json"
+    metadata_path =  Path("data/metadata.json")
     if not metadata_path.exists():
         return {
             "available": False,
@@ -148,43 +152,91 @@ def load_prediction_registry() -> dict[str, dict[str, Any]]:
 def get_prediction_artifact(horizon: str | None = None) -> dict[str, Any]:
     selected_horizon = horizon or DEFAULT_PREDICTION_HORIZON
     registry = load_prediction_registry()
-    return registry.get(
-        selected_horizon,
-        {
-            "available": False,
+    artifact = registry.get(selected_horizon)
+    if artifact:
+        return artifact
+
+    # Fallback: if DL artifact not found, check for ML forecast models (XGBoost / Random Forest)
+    from src.config import XGBOOST_FORECAST_MODEL_PATHS, RF_FORECAST_MODEL_PATHS, MODEL_THRESHOLDS
+    from src.config import FEATURE_COLS as GLOBAL_FEATURE_COLS
+
+    # Prefer XGBoost if available
+    xgb_path = Path(XGBOOST_FORECAST_MODEL_PATHS.get(selected_horizon, ""))
+    if xgb_path.exists():
+        return {
+            "available": True,
             "horizon": selected_horizon,
-            "error": f"Unsupported prediction horizon: {selected_horizon}",
-        },
-    )
+            "model_name": "xgboost",
+            "model_display_name": "XGBoost",
+            "model_path": str(xgb_path),
+            "metrics_path": "",
+            "comparison_path": "",
+            "threshold": float(MODEL_THRESHOLDS.get("XGBoost", {}).get(selected_horizon, 0.5)),
+            "scaler_dir": "",
+            "artifact_source": "ml_forecast",
+            "model_feature_count": len(GLOBAL_FEATURE_COLS),
+            "feature_contract_count": len(GLOBAL_FEATURE_COLS),
+            "model_window_steps": None,
+            "f1": None,
+            "precision": None,
+            "recall": None,
+            "accuracy": None,
+        }
+
+    rf_path = Path(RF_FORECAST_MODEL_PATHS.get(selected_horizon, ""))
+    if rf_path.exists():
+        return {
+            "available": True,
+            "horizon": selected_horizon,
+            "model_name": "rf",
+            "model_display_name": "Random Forest",
+            "model_path": str(rf_path),
+            "metrics_path": "",
+            "comparison_path": "",
+            "threshold": float(MODEL_THRESHOLDS.get("Random Forest", {}).get(selected_horizon, 0.5)),
+            "scaler_dir": "",
+            "artifact_source": "ml_forecast",
+            "model_feature_count": len(GLOBAL_FEATURE_COLS),
+            "feature_contract_count": len(GLOBAL_FEATURE_COLS),
+            "model_window_steps": None,
+            "f1": None,
+            "precision": None,
+            "recall": None,
+            "accuracy": None,
+        }
+
+    return {
+        "available": False,
+        "horizon": selected_horizon,
+        "error": f"Unsupported prediction horizon: {selected_horizon}",
+    }
 
 
 @st.cache_resource(show_spinner=False)
 def _load_keras_model(model_path: str):
     errors = []
+    
+    # 🌟 BƯỚC VÁ TƯƠNG THÍCH: Chuyển chuỗi đường dẫn thành Path object để dọn dẹp config
+    native_path = Path(model_path)
+    if native_path.suffix.lower() == ".keras":
+        compat_path = build_keras_compat_archive(native_path)
+        # Ép ngược về dạng chuỗi tuyệt đối chuẩn để Keras load mượt mà không lỗi dấu gạch chéo
+        model_path = str(compat_path.resolve())
+
+    # Tiến hành nạp mô hình bản vá
     for import_path in ("keras", "tensorflow.keras"):
         try:
             if import_path == "keras":
                 import keras
-
-                return keras.models.load_model(model_path, compile=False, safe_mode=False), None
-
-            from tensorflow.keras.models import load_model as keras_load_model
-
-            return keras_load_model(model_path, compile=False, safe_mode=False), None
-        except TypeError:
-            try:
-                if import_path == "keras":
-                    import keras
-
-                    return keras.models.load_model(model_path, compile=False), None
-
+                return keras.models.load_model(model_path, compile=False), None
+            else:
                 from tensorflow.keras.models import load_model as keras_load_model
-
                 return keras_load_model(model_path, compile=False), None
-            except Exception as exc:
-                errors.append(f"{import_path}: {exc}")
+                
         except Exception as exc:
-            errors.append(f"{import_path}: {exc}")
+            import traceback
+            errors.append(f"[{import_path}] {str(exc)}")
+            print(f"DEBUG LOAD ERROR ({import_path}): {traceback.format_exc()}")
 
     return None, " | ".join(errors)
 
@@ -249,6 +301,7 @@ def predict_future_risk_batch(
     history: pd.DataFrame,
     batch: pd.DataFrame,
     horizon: str | None = None,
+    artifact: dict | None = None,
 ) -> dict[str, Any]:
     """Predict future risk for each row in a just-streamed turbine batch."""
     selected_horizon = horizon or DEFAULT_PREDICTION_HORIZON
@@ -257,37 +310,44 @@ def predict_future_risk_batch(
     if batch.empty:
         return _empty_result(0, selected_horizon, "No batch data")
 
-    artifact = get_prediction_artifact(selected_horizon)
-    if not artifact.get("available"):
-        return _empty_result(batch_len, selected_horizon, artifact.get("error", "Prediction unavailable"))
+    # 🌟 SỬA LOGIC: Nếu UI truyền artifact qua thì ưu tiên dùng, không dùng mặc định
+    if artifact is not None:
+        current_artifact = artifact
+    else:
+        current_artifact = get_prediction_artifact(selected_horizon)
 
+    if not current_artifact.get("available"):
+        return _empty_result(batch_len, selected_horizon, current_artifact.get("error", "Prediction unavailable"))
+
+    # Lấy metadata, nếu lỗi hoặc không có thì vẫn tiếp tục chạy luồng Custom UI thay vì return _empty_result ngay
     metadata = load_prediction_metadata()
-    if not metadata.get("available"):
-        return _empty_result(batch_len, selected_horizon, metadata.get("error", "Metadata unavailable"))
-
+    
+    # 🌟 SỬA ĐOẠN NÀY: Dự phòng danh sách các cột sensor (features) nếu file metadata không có
     feature_cols = list(metadata.get("feature_cols") or [])
+    from src.config import FEATURE_COLS as GLOBAL_FEATURE_COLS
+    if not feature_cols:
+        feature_cols = list(GLOBAL_FEATURE_COLS)
+        
     window_steps = int(metadata.get("window_steps") or PREDICTION_WINDOW_STEPS)
-    model_feature_count = artifact.get("model_feature_count")
-    if model_feature_count and len(feature_cols) != int(model_feature_count):
-        return _empty_result(
-            batch_len,
-            selected_horizon,
-            (
-                f"Feature contract mismatch: model expects {int(model_feature_count)} "
-                f"features, online stream provides {len(feature_cols)}."
-            ),
-        )
+    
+    # 🌟 SỬA ĐOẠN NÀY: Nới lỏng kiểm tra contract. 
+    # Nếu đang dùng luồng Tùy chỉnh từ UI (custom_ui_selection), ta bỏ qua việc so khớp nghiêm ngặt này
+    if current_artifact.get("artifact_source") != "custom_ui_selection":
+        model_feature_count = current_artifact.get("model_feature_count")
+        if model_feature_count and len(feature_cols) != int(model_feature_count):
+            return _empty_result(
+                batch_len,
+                selected_horizon,
+                f"Feature contract mismatch: model expects {int(model_feature_count)} features, online stream provides {len(feature_cols)}."
+            )
 
-    model_window_steps = artifact.get("model_window_steps")
-    if model_window_steps and window_steps != int(model_window_steps):
-        return _empty_result(
-            batch_len,
-            selected_horizon,
-            (
-                f"Window mismatch: model expects {int(model_window_steps)} steps, "
-                f"online stream provides {window_steps}."
-            ),
-        )
+        model_window_steps = current_artifact.get("model_window_steps")
+        if model_window_steps and window_steps != int(model_window_steps):
+            return _empty_result(
+                batch_len,
+                selected_horizon,
+                f"Window mismatch: model expects {int(model_window_steps)} steps, online stream provides {window_steps}."
+            )
 
     missing_features = [col for col in feature_cols if col not in batch.columns]
     if missing_features:
@@ -296,19 +356,84 @@ def predict_future_risk_batch(
             msg += "..."
         return _empty_result(batch_len, selected_horizon, msg)
 
-    model_path = Path(str(artifact["model_path"]))
+    # 🌟 LẤY ĐƯỜNG DẪN MÔ HÌNH CHUẨN ĐÃ ĐƯỢC PHÂN LUỒNG TỪ UI
+    model_path = Path("models") / str(current_artifact["model_path"])
     if not model_path.exists():
-        return _empty_result(batch_len, selected_horizon, f"Prediction model not found: {model_path}")
+        # Sửa câu thông báo lỗi chi tiết đường dẫn tuyệt đối giúp bạn dễ debug file nằm đâu
+        print(f"DEBUG: Model file for prediction not found at path: {model_path.absolute()}")
+        return _empty_result(
+            batch_len, 
+            selected_horizon, 
+            f"Prediction model file NOT FOUND at: {model_path.absolute()}"
+        )
+        
+    # --- PHÂN LUỒNG TẢI MÔ HÌNH ML (.pkl) ---
+    if model_path.suffix.lower() == ".pkl":
+        try:
+            import joblib
+        except Exception:
+            return _empty_result(batch_len, selected_horizon, "joblib not available to load ML model")
 
-    scaler_dir = Path(str(artifact.get("scaler_dir") or (PREDICTION_CLASSIFIER_EXPORT_DIR / "scalers")))
+        try:
+            model = joblib.load(str(model_path))
+        except Exception as exc:
+            return _empty_result(batch_len, selected_horizon, _short_status(f"ML model load failed: {exc}"))
+
+        from src.config import ROOT_DIR
+        ml_scaler_path = Path(ROOT_DIR) / "models" / "Baseline" / "ML_scaler" / "scada_scaler_full.pkl"
+        if not ml_scaler_path.exists():
+            return _empty_result(batch_len, selected_horizon, f"ML scaler not found: {ml_scaler_path}")
+
+        scaler, scaler_error = _load_asset_scaler(str(ml_scaler_path.resolve()))
+        if scaler is None:
+            print(f"DEBUG: {scaler_error} when loading scaler from {ml_scaler_path.resolve()}")
+            return _empty_result(batch_len, selected_horizon, _short_status(f"ML scaler load failed: {scaler_error}"))
+
+        try:
+            X = batch[feature_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0).to_numpy(dtype=np.float32)
+            X_scaled = scaler.transform(X)
+        except Exception as exc:
+            return _empty_result(batch_len, selected_horizon, _short_status(f"Scaler transform failed: {exc}"))
+
+        try:
+            if hasattr(model, "predict_proba"):
+                raw_scores = model.predict_proba(X_scaled)[:, 1]
+            else:
+                raw_scores = model.predict(X_scaled).astype(float)
+        except Exception as exc:
+            return _empty_result(batch_len, selected_horizon, _short_status(f"ML prediction failed: {exc}"))
+
+        # Sử dụng ngưỡng threshold động lấy từ current_artifact
+        threshold = float(current_artifact.get("threshold") or 0.5)
+        scores = np.asarray(raw_scores, dtype=float)
+        labels = (scores >= threshold).astype(int)
+        statuses = ["Ready"] * batch_len
+
+        return {
+            "scores": scores,
+            "labels": labels,
+            "statuses": statuses,
+            "horizon": selected_horizon,
+            "model_name": current_artifact.get("model_display_name", model_path.stem),
+            "threshold": threshold,
+        }
+
+    # --- PHÂN LUỒNG TẢI MÔ HÌNH DL (.keras) ---
+    scaler_dir = Path("models/DeepLearning/detection_scalers")
     scaler_path = scaler_dir / f"asset_{asset_id}.pkl"
     if not scaler_path.exists():
         return _empty_result(batch_len, selected_horizon, f"Prediction scaler not found: {scaler_path}")
 
-    model, model_error = _load_keras_model(str(model_path))
+    resolved_path_str = str(model_path.resolve())
+    model = load_model(resolved_path_str, use_for_real_time_monitor=True)
+    
     if model is None:
-        return _empty_result(batch_len, selected_horizon, _short_status(f"Prediction model load failed: {model_error}"))
-
+        model_error = f"Khong the nap model tu file: {resolved_path_str}. Vui long kiem tra Terminal de xem chi tiet loi can thiep Keras!"
+        return _empty_result(
+            batch_len, 
+            selected_horizon, 
+            f"Prediction model load failed: {model_error}"
+        )
     scaler, scaler_error = _load_asset_scaler(str(scaler_path))
     if scaler is None:
         return _empty_result(batch_len, selected_horizon, _short_status(f"Prediction scaler load failed: {scaler_error}"))
@@ -339,20 +464,23 @@ def predict_future_risk_batch(
         try:
             scaled = scaler.transform(feature_frame.to_numpy(dtype=np.float32))
         except Exception as exc:
+            print(f"DEBUG: {exc} when scaling features for asset {asset_id} at offset {offset}")
             statuses[offset] = _short_status(f"Scaler transform failed: {exc}")
             continue
 
         sequences.append(np.asarray(scaled, dtype=np.float32))
         row_offsets.append(offset)
 
+    threshold = float(current_artifact["threshold"])
+    
     if not sequences:
         return {
             "scores": scores,
             "labels": labels,
             "statuses": statuses,
             "horizon": selected_horizon,
-            "model_name": artifact.get("model_display_name", ""),
-            "threshold": float(artifact["threshold"]),
+            "model_name": current_artifact.get("model_display_name", ""),
+            "threshold": threshold,
         }
 
     try:
@@ -366,11 +494,10 @@ def predict_future_risk_batch(
             "labels": labels,
             "statuses": statuses,
             "horizon": selected_horizon,
-            "model_name": artifact.get("model_display_name", ""),
-            "threshold": float(artifact["threshold"]),
+            "model_name": current_artifact.get("model_display_name", ""),
+            "threshold": threshold,
         }
 
-    threshold = float(artifact["threshold"])
     for offset, score in zip(row_offsets, raw_scores):
         score_value = float(score)
         scores[offset] = score_value
@@ -382,6 +509,6 @@ def predict_future_risk_batch(
         "labels": labels,
         "statuses": statuses,
         "horizon": selected_horizon,
-        "model_name": artifact.get("model_display_name", ""),
+        "model_name": current_artifact.get("model_display_name", ""),
         "threshold": threshold,
     }

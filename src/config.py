@@ -50,6 +50,22 @@ AVAILABLE_MODELS = {
 }
 
 MODEL_THRESHOLDS = {
+    "XGBoost": {
+        "Current": 0.5,
+        "12h": 0.5,
+        "24h": 0.5,
+        "36h": 0.5,
+        "48h": 0.5,
+        "72h": 0.5
+    },
+    "Random Forest": {
+        "Current": 0.5,
+        "12h": 0.5,
+        "24h": 0.5,
+        "36h": 0.5,
+        "48h": 0.5,
+        "72h": 0.5
+    },
     "LSTM": {
         "Current": 0.353,
         "12h": 0.405,
@@ -83,6 +99,8 @@ MODEL_THRESHOLDS = {
         "72h": 0.392
     }
 }
+
+ML_SCALER_PATH = MODELS_DIR / "Baseline" / "ML_scaler" / "scada_scaler_full.pkl"
 
 XGBOOST_FORECAST_OPTIONS = {
     "Current": "Baseline/XGBoost/xgb_model.pkl",
@@ -366,30 +384,32 @@ SENSOR_GROUPS = {
         "sensor_0_avg",   # Ambient Temp
         "sensor_10_avg",  # Cooling Water Temp
         "sensor_14_avg",  # Gen Bearing Temp
+        "sensor_19_avg",  # Split Ring Chamber Temp
         "sensor_38_avg",  # HV Transformer Temp L1
         "sensor_40_avg",  # HV Transformer Temp L3
         "sensor_41_avg",  # Hydraulic Oil Temp
-        "sensor_43_avg"   # Nacelle Temp
-    ],
-    "Wind": [
-        "wind_speed_3_min" # Wind Speed (min)
-    ],
-    "Rotational Speed": [
-        "sensor_52_max"    # Rotor RPM (max)
-    ],
-    "Power": [
-        "power_30_std"     # Grid Active Power (std)
-    ],
-    "Electrical": [
-        "reactive_power_27_max", # Reactive Power cap (max)
-        "sensor_47"              # Reactive Power Disconnected
     ],
     "Pitch & Yaw": [
-        "sensor_5_avg_cos", # Pitch angle cos (avg)
-        "sensor_5_max_cos", # Pitch angle cos (max)
-        "sensor_5_min_cos", # Pitch angle cos (min)
-        "sensor_5_avg_sin", # Pitch angle sin (avg)
-        "sensor_5_min_sin"  # Pitch angle sin (min)
+        "sensor_5_avg_cos",  # Pitch angle cos (avg)
+        "sensor_5_avg_sin",  # Pitch angle sin (avg)
+        "sensor_5_min_cos",  # Pitch angle cos (min)
+        "sensor_5_min_sin",  # Pitch angle sin (min)
+        "sensor_5_max_cos",  # Pitch angle cos (max)
+        "sensor_42_avg_cos", # Nacelle direction (cos)
+        "sensor_1_avg_sin",  # Wind direction sin (avg)
+    ],
+    "Wind": [
+        "wind_speed_3_min"  # Wind Speed (min)
+    ],
+    "Rotational": [
+        "sensor_18_avg"     # Generator / Rotor RPM (avg)
+    ],
+    "Electrical": [
+        "sensor_33_avg",      # Voltage Phase 2
+        "sensor_34_avg",      # Voltage Phase 3
+        "sensor_44",          # Active Power - Generator Disconnected
+        "reactive_power_28_min",
+        "reactive_power_28_max",
     ],
 }
 
