@@ -60,7 +60,7 @@ def load_backend_artifacts():
             if model is not None:
                 loaded_models[model_name] = model
             else:
-                st.warning(f"Không thể nạp được model: {model_name}. Vui lòng kiểm tra lại file.")
+                st.warning(f"Could not load model: {model_name}. Please check the model file.")
                 
         xgb_forecast_models = {}
         for horizon, path in XGBOOST_FORECAST_MODEL_PATHS.items():
@@ -68,9 +68,9 @@ def load_backend_artifacts():
                 try:
                     xgb_forecast_models[horizon] = joblib.load(path)
                 except Exception as e:
-                    st.warning(f"Không thể nạp XGBoost {horizon} từ '{path}': {e}")
+                    st.warning(f"Could not load XGBoost {horizon} from '{path}': {e}")
             else:
-                st.warning(f"Không tìm thấy file XGBoost {horizon}: {path}")
+                st.warning(f"XGBoost {horizon} file was not found: {path}")
 
         if xgb_forecast_models:
             if "XGBoost" in loaded_models and not isinstance(loaded_models["XGBoost"], dict):
@@ -83,9 +83,9 @@ def load_backend_artifacts():
                 try:
                     rf_forecast_models[horizon] = joblib.load(path)
                 except Exception as e:
-                    st.warning(f"Không thể nạp Random Forest {horizon} từ '{path}': {e}")
+                    st.warning(f"Could not load Random Forest {horizon} from '{path}': {e}")
             else:
-                st.warning(f"Không tìm thấy file Random Forest {horizon}: {path}")
+                st.warning(f"Random Forest {horizon} file was not found: {path}")
 
         if rf_forecast_models:
             if "Random Forest" in loaded_models and not isinstance(loaded_models["Random Forest"], dict):
@@ -99,9 +99,9 @@ def load_backend_artifacts():
                     try:
                         dl_models[horizon] = keras_load_model(path)
                     except Exception as e:
-                        st.warning(f"Không thể nạp {model_name} {horizon} từ '{path}': {e}")
+                        st.warning(f"Could not load {model_name} {horizon} from '{path}': {e}")
                 else:
-                    st.warning(f"Không tìm thấy file {model_name} {horizon}: {path}")
+                    st.warning(f"{model_name} {horizon} file was not found: {path}")
             if dl_models:
                 if model_name in loaded_models and not isinstance(loaded_models[model_name], dict):
                     dl_models.setdefault("Current", loaded_models[model_name])
@@ -110,7 +110,7 @@ def load_backend_artifacts():
         return None, loaded_models
         
     except Exception as e:
-        st.error(f"Lỗi khi load models: {e}")
+        st.error(f"Error loading models: {e}")
         return None, None
 
 def apply_rolling_window(df_raw, windows=[3, 6]):
@@ -149,7 +149,7 @@ def shift_labels_for_forecast(df, forecast_horizon_hours: str):
     try:
         hours = int(forecast_horizon_hours.replace('h', ''))
     except ValueError:
-        st.warning(f"Không thể parse horizon '{forecast_horizon_hours}'. Sử dụng nhãn hiện tại.")
+        st.warning(f"Could not parse horizon '{forecast_horizon_hours}'. Using the current label.")
         return df_shifted
     if hours == 0:
         return df_shifted
@@ -341,7 +341,7 @@ def run_sequence_live_inference(df, model_name: str, forecast_horizon):
     model_path = Path(ROOT_DIR) / "models" / model_relative_path if not Path(model_relative_path).is_absolute() else Path(model_relative_path)
     
     if not model_path.exists(): 
-        raise FileNotFoundError(f"Không tìm thấy file Model Keras thực tế tại đường dẫn: {model_path}")
+        raise FileNotFoundError(f"Keras model file was not found at: {model_path}")
 
     # 3. ĐỌC METADATA CẤU HÌNH HỆ THỐNG
     metadata = load_sequence_metadata_settings()

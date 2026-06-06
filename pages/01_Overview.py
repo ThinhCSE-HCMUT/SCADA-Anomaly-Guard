@@ -141,19 +141,27 @@ if not history.empty or not current_det.empty:
             y_max = max(20.0, round(max_rate * 1.3 + 2))
             fig.update_yaxes(ticksuffix="%", range=[0, y_max])
             fig.add_hline(
-                y=15, line_dash="dash", line_color="#ef4444",
-                annotation_text="Critical 15%", annotation_position="top right",
+                y=65, line_dash="dash", line_color="#ef4444",
+                annotation_text="Critical 65%", annotation_position="top right",
                 annotation_font_size=10,
             )
             fig.add_hline(
-                y=2, line_dash="dot", line_color="#eab308",
-                annotation_text="Warning 2%", annotation_position="top right",
+                y=40, line_dash="dot", line_color="#eab308",
+                annotation_text="Warning 40%", annotation_position="top right",
                 annotation_font_size=10,
             )
-            fig.update_traces(textposition='outside')
+            fig.update_traces(
+                textposition="outside",
+                customdata=anomaly_summary_df["Anomaly Count"].values,
+                hovertemplate=(
+                    "<b>%{x}</b><br>"
+                    "Anomaly Rate: <b>%{y:.2f}%</b><br>"
+                    "Flagged Points: %{customdata}<extra></extra>"
+                ),
+            )
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("📊 Hệ thống đang vận hành ổn định, chưa ghi nhận điểm bất thường nào trên cả 5 Tuabin.")
+            st.info("📊 The system is operating normally. No abnormal points have been recorded across the 5 turbines.")
 
     with kpi_col:
         st.subheader("Live Component Status")
@@ -180,10 +188,10 @@ if not history.empty or not current_det.empty:
                     last_ts = pd.to_datetime(t_ts_df["time_stamp"].iloc[-1], errors="coerce")
             ts_str = last_ts.strftime("%m/%d %H:%M") if last_ts is not None and pd.notna(last_ts) else "–"
 
-            if t_rate > 15.0:
+            if t_rate > 65.0:
                 status_color = "🔴 Critical"
                 action_text = "Initiate emergency shutdown procedure. Dispatch on-site technician immediately. Log incident in CMMS."
-            elif t_rate > 2.0:
+            elif t_rate > 40.0:
                 status_color = "🟡 Warning"
                 action_text = "Schedule inspection before next shift. Reduce load if possible. Flag work order in maintenance system."
             else:
@@ -244,7 +252,7 @@ if not history.empty or not current_det.empty:
                             else:
                                 st.caption("No data for this asset.")
                 else:
-                    st.info("Không có dữ liệu cảm biến cho nhóm này.")
+                    st.info("No sensor data is available for this group.")
 else:
     st.info("💡 Waiting for sensor data... Please go to 'Real-time Monitor' page and click 'Start' to begin streaming.")
 
@@ -255,7 +263,7 @@ st.caption("Tip: Click on 'Real-time Monitor' or 'Turbines List' in the sidebar 
 if is_running:
     status = run_simulation_step()
     if status == "DONE":
-        st.success("✅ Đã stream hết toàn bộ dữ liệu 5 turbines!")
+        st.success("✅ Finished streaming all data for the 5 turbines.")
     else:
         time.sleep(1) 
         st.rerun()

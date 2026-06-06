@@ -34,6 +34,7 @@ from src.config import (
     get_sensor_unit,
     MODEL_THRESHOLDS,
     DL_FORECAST_OPTIONS,
+    SENSOR_OPERATING_LIMITS,
 )
 from src.data_loader import load_online_prediction_data
 from src.model_manager import load_model
@@ -128,11 +129,26 @@ def _chart_revision(df: pd.DataFrame) -> str:
     return f"{len(df)}-{latest_time}"
 
 
+def _first_alert_ts(det_df: pd.DataFrame, asset_id: int):
+    """Return earliest pred_label==1 timestamp for asset_id, or None."""
+    if det_df.empty or "pred_label" not in det_df.columns:
+        return None
+    sub = det_df[
+        pd.to_numeric(det_df["asset_id"], errors="coerce").fillna(-1).astype(int).eq(asset_id)
+        & det_df["pred_label"].eq(1)
+    ]
+    if sub.empty:
+        return None
+    ts = pd.to_datetime(sub["time_stamp"], errors="coerce").dropna()
+    return ts.min() if not ts.empty else None
+
+
 def _render_live_chart(fig: go.Figure, chart_key: str) -> None:
     chart_config = {
-        "displayModeBar": False,
-        "responsive": True,
+        "displayModeBar": "hover",
         "scrollZoom": False,
+        "responsive": True,
+        "modeBarButtonsToRemove": ["select2d", "lasso2d", "autoScale2d"],
     }
     try:
         st.plotly_chart(fig, use_container_width=True, key=chart_key, config=chart_config)
@@ -375,7 +391,9 @@ current_data = (
 
 if not current_data.empty and chosen_sensors:
     valid_sensors = [col for col in chosen_sensors if col in current_data.columns]
-    cd = current_data.sort_values("time_stamp").reset_index(drop=True)
+    cd_full = current_data.sort_values("time_stamp").reset_index(drop=True)
+    cd = cd_full.tail(PREDICTION_WINDOW_STEPS).reset_index(drop=True)
+    stream_steps = len(cd_full)
 
     label_col = "pred_label" if is_ml_future else "future_risk_label"
     score_col = "anomaly_score" if is_ml_future else "future_risk_score"
@@ -420,13 +438,39 @@ if not current_data.empty and chosen_sensors:
         else pd.DataFrame()
     )
 
+    # Chart markers: always use current detection (pred_label) — never future risk
+    # Filter to the same time window as cd so markers align with visible sensor lines
+    _cur_det_raw = st.session_state.get("current_detection_history_data", pd.DataFrame())
+    if not _cur_det_raw.empty and "pred_label" in _cur_det_raw.columns:
+        _cur_det_tid = _cur_det_raw[
+            pd.to_numeric(_cur_det_raw["asset_id"], errors="coerce").fillna(-1).astype(int).eq(selected_asset)
+        ]
+        _det_anom = _cur_det_tid[_cur_det_tid["pred_label"].eq(1)].copy()
+        if not _det_anom.empty and not cd.empty and "time_stamp" in cd.columns:
+            _cd_min = pd.to_datetime(cd["time_stamp"].min())
+            _cd_max = pd.to_datetime(cd["time_stamp"].max())
+            _det_anom["time_stamp"] = pd.to_datetime(_det_anom["time_stamp"])
+            chart_det_pts = _det_anom[_det_anom["time_stamp"].between(_cd_min, _cd_max)]
+        else:
+            chart_det_pts = _det_anom
+    else:
+        chart_det_pts = pd.DataFrame()
+
     if valid_sensors:
+        _cur_det_for_chart = st.session_state.get("current_detection_history_data", pd.DataFrame())
+        _has_score = (
+            not _cur_det_for_chart.empty
+            and "anomaly_score" in _cur_det_for_chart.columns
+        )
+        n_chart_rows = len(valid_sensors) + (1 if _has_score else 0)
         fig = make_subplots(
-            rows=len(valid_sensors),
+            rows=n_chart_rows,
             cols=1,
             shared_xaxes=True,
             vertical_spacing=0.025,
-            subplot_titles=[get_sensor_label(col) for col in valid_sensors],
+            subplot_titles=[get_sensor_label(col) for col in valid_sensors]
+                + (["Model Confidence Score"] if _has_score else []),
+            row_heights=[1.0] * len(valid_sensors) + ([0.35] if _has_score else []),
         )
 
         for index, col in enumerate(valid_sensors):
@@ -472,20 +516,25 @@ if not current_data.empty and chosen_sensors:
                     col=1,
                 )
 
-            if not risk_pts.empty:
+            if not chart_det_pts.empty and col in chart_det_pts.columns:
+                _score_data = (
+                    chart_det_pts["anomaly_score"].values
+                    if "anomaly_score" in chart_det_pts.columns
+                    else None
+                )
                 fig.add_trace(
                     go.Scatter(
-                        x=risk_pts["time_stamp"],
-                        y=risk_pts[col],
+                        x=chart_det_pts["time_stamp"],
+                        y=chart_det_pts[col],
                         mode="markers",
-                        marker=dict(color=STATUS_COLORS["Warning"], size=7, symbol="diamond"),
-                        name=model_type_text if row_idx == 1 else None,
+                        marker=dict(color=STATUS_COLORS["Anomaly"], size=6, symbol="circle"),
+                        name="Current Detection" if row_idx == 1 else None,
                         showlegend=(row_idx == 1),
-                        customdata=risk_pts[score_col],
+                        customdata=_score_data,
                         hovertemplate=(
-                            f"<b>{model_type_text.upper()}</b><br>%{{x|%H:%M}}<br>"
+                            "<b>ANOMALY DETECTED</b><br>%{x|%H:%M}<br>"
                             f"{label_name}: %{{y:.3f}}<br>"
-                            "Score: %{customdata:.3f}<extra></extra>"
+                            + ("Score: %{customdata:.3f}<extra></extra>" if _score_data is not None else "<extra></extra>")
                         ),
                     ),
                     row=row_idx,
@@ -502,37 +551,111 @@ if not current_data.empty and chosen_sensors:
                     col=1,
                 )
 
+            limits = SENSOR_OPERATING_LIMITS.get(col, {})
+            for level, color, dash in [
+                ("warn_hi", "rgba(251,191,36,0.65)", "dot"),
+                ("crit_hi", "rgba(239,68,68,0.80)",  "dash"),
+                ("warn_lo", "rgba(251,191,36,0.65)", "dot"),
+                ("crit_lo", "rgba(239,68,68,0.80)",  "dash"),
+            ]:
+                if level in limits:
+                    fig.add_hline(
+                        y=limits[level],
+                        line_dash=dash,
+                        line_color=color,
+                        line_width=1.0,
+                        row=row_idx,
+                        col=1,
+                        annotation_text=level.replace("_", " "),
+                        annotation_font_size=8,
+                        annotation_font_color=color,
+                    )
+
             fig.update_yaxes(title_text=y_title, title_font_size=10, row=row_idx, col=1)
 
-        # "Now" marker and forecast window
+        # "Now" marker — vertical line at the last streamed data point
         if "time_stamp" in cd.columns and not cd.empty:
             now_ts = pd.to_datetime(cd["time_stamp"].iloc[-1], errors="coerce")
             if pd.notna(now_ts):
-                horizon_str = st.session_state.get("prediction_horizon", DEFAULT_PREDICTION_HORIZON)
-                try:
-                    horizon_hours = int(horizon_str.replace("h", ""))
-                except (ValueError, AttributeError):
-                    horizon_hours = 24
-                end_forecast_ts = now_ts + pd.Timedelta(hours=horizon_hours)
                 now_ms = int(now_ts.timestamp() * 1000)
-                end_ms = int(end_forecast_ts.timestamp() * 1000)
-                # Shapes without per-row annotations to avoid repeating labels
                 fig.add_vline(x=now_ms, line_dash="dash", line_color="rgba(255,255,255,0.45)")
-                fig.add_vrect(x0=now_ms, x1=end_ms, fillcolor="rgba(234,179,8,0.06)", line_width=0)
-                # Single annotation at the very top of the figure
                 fig.add_annotation(
                     x=now_ms, xref="x",
                     y=1.0, yref="paper",
-                    text=f"Now  |  {horizon_str} forecast window →",
+                    text="Now",
                     showarrow=False,
-                    font=dict(size=9, color="rgba(234,179,8,0.75)"),
+                    font=dict(size=9, color="rgba(255,255,255,0.55)"),
                     xanchor="left",
-                    yanchor="bottom",
+                    yanchor="top",
+                    yshift=-18,
                     bgcolor="rgba(0,0,0,0)",
                 )
 
+        # Score overlay subplot
+        if _has_score:
+            score_row = n_chart_rows
+            _score_tid = _cur_det_for_chart[
+                pd.to_numeric(_cur_det_for_chart["asset_id"], errors="coerce")
+                .fillna(-1).astype(int).eq(selected_asset)
+            ].copy()
+            if not _score_tid.empty:
+                _score_tid["time_stamp"] = pd.to_datetime(_score_tid["time_stamp"], errors="coerce")
+                _active_threshold = st.session_state.get("active_prediction_artifact", {}).get("threshold", 0.5)
+                fig.add_trace(
+                    go.Scatter(
+                        x=_score_tid["time_stamp"],
+                        y=_score_tid["anomaly_score"],
+                        mode="lines",
+                        fill="tozeroy",
+                        fillcolor="rgba(239,68,68,0.15)",
+                        line=dict(color="rgba(239,68,68,0.8)", width=1.2),
+                        name="Anomaly Score",
+                        showlegend=True,
+                        hovertemplate="Score: %{y:.3f}<br>%{x|%H:%M}<extra></extra>",
+                    ),
+                    row=score_row,
+                    col=1,
+                )
+                fig.add_hline(
+                    y=_active_threshold,
+                    line_dash="dash",
+                    line_color="rgba(251,191,36,0.7)",
+                    line_width=1.0,
+                    annotation_text=f"threshold {_active_threshold:.2f}",
+                    annotation_font_size=8,
+                    annotation_font_color="rgba(251,191,36,0.9)",
+                    row=score_row,
+                    col=1,
+                )
+                fig.update_yaxes(title_text="score", title_font_size=9, range=[0, 1], row=score_row, col=1)
+
+        # First-fault vertical marker
+        _first_ts = _first_alert_ts(
+            st.session_state.get("current_detection_history_data", pd.DataFrame()),
+            selected_asset,
+        )
+        if _first_ts is not None:
+            _first_ms = int(_first_ts.timestamp() * 1000)
+            fig.add_vline(
+                x=_first_ms,
+                line_dash="dot",
+                line_color="rgba(251,191,36,0.7)",
+                line_width=1.5,
+            )
+            fig.add_annotation(
+                x=_first_ms, xref="x",
+                y=1.0, yref="paper",
+                text="FIRST ALERT",
+                showarrow=False,
+                font=dict(size=9, color="rgba(251,191,36,0.9)"),
+                xanchor="left",
+                yanchor="top",
+                yshift=-18,
+                bgcolor="rgba(0,0,0,0)",
+            )
+
         fig.update_layout(
-            height=max(350, 165 * len(valid_sensors)),
+            height=max(350, 165 * len(valid_sensors) + (60 if _has_score else 0)),
             template="plotly_dark",
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
@@ -543,22 +666,63 @@ if not current_data.empty and chosen_sensors:
         )
         chart_key = f"live_sensor_trends_{selected_asset}_{'_'.join(valid_sensors)}"
         fig.update_layout(uirevision=chart_key, datarevision=_chart_revision(cd))
-        fig.update_xaxes(showgrid=True, gridcolor="rgba(255,255,255,0.07)", tickformat="%m/%d %H:%M", tickangle=-30)
+        fig.update_xaxes(
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.07)",
+            tickformat="%H:%M",
+            tickangle=-30,
+            nticks=12,
+        )
         fig.update_yaxes(showgrid=True, gridcolor="rgba(255,255,255,0.07)")
+
+        # Default visible window: last 2h. Click-drag on chart to pan through history.
+        if "time_stamp" in cd.columns and not cd.empty:
+            _rng_now = pd.to_datetime(cd["time_stamp"].iloc[-1], errors="coerce")
+            if pd.notna(_rng_now):
+                fig.update_layout(
+                    xaxis=dict(range=[_rng_now - pd.Timedelta(hours=2), _rng_now]),
+                    dragmode="pan",
+                )
 
         _render_live_chart(fig, chart_key)
 
         total = len(cd)
-        n_risk = int(cd[label_col].sum()) if label_col in cd.columns else 0
+        scored_mask = cd[score_col].notna() if score_col in cd.columns else pd.Series(False, index=cd.index)
+        scored_total = int(scored_mask.sum())
+        n_risk = int(cd.loc[scored_mask, label_col].sum()) if label_col in cd.columns else 0
+        pending_total = total - scored_total
+        window_text = (
+            f"showing last {total}/{stream_steps} time steps"
+            if stream_steps > total
+            else f"showing {total} time steps"
+        )
         st.caption(
             f"{TURBINE_LABELS[selected_asset]} — "
-            f"{n_risk}/{total} predicted anomaly points ({n_risk / total * 100:.1f}%) · "
+            f"{n_risk}/{scored_total} scored anomaly points "
+            f"({(n_risk / scored_total * 100) if scored_total else 0.0:.1f}%)"
+            f"{f' · {pending_total} pending window warm-up rows' if pending_total else ''} · "
+            f"{window_text} · "
             f"Model: {model_type_text} · Horizon: {st.session_state.get('prediction_horizon', DEFAULT_PREDICTION_HORIZON)}"
         )
     else:
         st.warning("No selected chart sensors are available in this stream.")
 else:
     st.warning("No data is streaming yet. Press Start to begin.")
+
+st.divider()
+
+# ====================== ACTIVE ALERTS PANEL ======================
+with st.expander("Active Alerts", expanded=True):
+    _alert_records = st.session_state.get("anomaly_records", [])
+    if _alert_records:
+        _alerts_df = pd.DataFrame(_alert_records[-20:][::-1])
+        _alerts_df.columns = [c.title() for c in _alerts_df.columns]
+        if "Score" in _alerts_df.columns:
+            _alerts_df["Score"] = _alerts_df["Score"].map("{:.3f}".format)
+        st.dataframe(_alerts_df, use_container_width=True, hide_index=True)
+        st.caption(f"{len(_alert_records)} total anomaly events since monitoring started.")
+    else:
+        st.caption("No anomalies detected yet.")
 
 st.divider()
 
@@ -636,15 +800,25 @@ for tid in TARGET_TURBINES:
             fut_ts = pd.to_datetime(last_fut.get("time_stamp"), errors="coerce")
             future_ts_str = fut_ts.strftime("%m/%d %H:%M") if pd.notna(fut_ts) else "–"
 
+    # Onset time for this turbine
+    _onset = _first_alert_ts(current_detection_history, tid)
+    onset_str = _onset.strftime("%m/%d %H:%M") if _onset is not None else "–"
+
     # Tier + recommended action
     if is_current_anom and current_score > 0.7:
         tier_icon = "🔴"
         tier_text = "CRITICAL"
-        action_text = "Initiate emergency shutdown procedure. Dispatch on-site technician immediately. Log incident in CMMS."
+        action_text = (
+            f"Emergency shutdown procedure initiated (first alert: {onset_str}). "
+            "Dispatch on-site technician immediately. Log incident in CMMS."
+        )
     elif future_label or future_pct > 30:
         tier_icon = "🟠"
         tier_text = "URGENT"
-        action_text = f"Schedule inspection before next shift. Reduce load if possible. Flag work order for {risk_horizon} window."
+        action_text = (
+            f"Schedule inspection before next shift (alert since {onset_str}). "
+            f"Reduce load if possible. Flag work order for {risk_horizon} window."
+        )
     elif detected_rate > 10 or (pd.notna(future_score) and float(future_score) > 0.4):
         tier_icon = "🟡"
         tier_text = "WATCH"
@@ -693,6 +867,7 @@ for tid in TARGET_TURBINES:
                 st.caption("Acquiring sliding window data...")
 
         st.markdown(f"**Recommended action:** {action_text}")
+        st.caption(f"First alert: {onset_str}")
 
 st.divider()
 

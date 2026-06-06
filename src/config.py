@@ -251,6 +251,17 @@ CHART_SENSOR_COLS = [
     'wind_speed_3_min',
 ]
 
+# Operating limits for warn/critical horizontal bands on the live chart.
+# Keys match CHART_SENSOR_COLS. Values: warn_hi, crit_hi, warn_lo, crit_lo (unit matches sensor unit).
+SENSOR_OPERATING_LIMITS: dict = {
+    "sensor_0_avg":     {"warn_hi": 35.0},
+    "sensor_10_avg":    {"warn_hi": 48.0, "crit_hi": 55.0},
+    "sensor_41_avg":    {"warn_hi": 48.0, "crit_hi": 55.0},
+    "sensor_14_avg":    {"warn_hi": 80.0, "crit_hi": 90.0},
+    "sensor_18_avg":    {"warn_lo": 1500.0, "crit_lo": 1400.0},
+    "wind_speed_3_min": {"warn_hi": 13.0,  "crit_hi": 25.0},
+}
+
 
 # Rolling-window engineered columns (84 cols: mean/std × window 3 & 6)
 _ROLLING_COLS = [
@@ -466,7 +477,7 @@ CHART_CONFIG = {
 }
 
 # ====================== SIMULATION SETTINGS ======================
-SIMULATION_DELAY       = 3.0    # seconds between auto-rerun steps
+SIMULATION_DELAY       = 2.0    # seconds between auto-rerun steps
 SIMULATION_BATCH_SIZE  = 10     # rows per step per turbine
 SIMULATION_MAX_HISTORY = 150    # max data points kept per turbine in live view
 
