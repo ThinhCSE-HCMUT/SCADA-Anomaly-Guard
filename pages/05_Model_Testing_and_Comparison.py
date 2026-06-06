@@ -384,14 +384,8 @@ def run_sequence_live_inference(df, model_name: str, forecast_horizon):
     # Kiểm tra xem có scalers tồn tại không
     available_scalers = list(scaler_dir.glob("asset_*.pkl")) if scaler_dir.exists() else []
     
-    # Fallback: Nếu không có scalers cho horizon cụ thể, thử DETECTION_SCALER_DIR
-    if not available_scalers and string_horizon != "Current":
-        print(f"[{model_name}@{string_horizon}] No scalers in {scaler_dir}, trying DETECTION_SCALER_DIR fallback...")
-        scaler_dir = DETECTION_SCALER_DIR
-        available_scalers = list(scaler_dir.glob("asset_*.pkl")) if scaler_dir.exists() else []
-    
     if not available_scalers:
-        raise ValueError(f"No scalers found in {scaler_dir} and no fallback available. Cannot run inference without scalers.")
+        raise ValueError(f"No scalers found in {scaler_dir}. Cannot run inference without scalers.")
     
     # Log info về scalers
     available_asset_ids = set(int(f.stem.split("_")[1]) for f in available_scalers if f.stem.startswith("asset_"))

@@ -2,7 +2,10 @@ import pandas as pd
 import streamlit as st
 
 from src.config import (
+    AVAILABLE_MODELS,
     DEFAULT_PREDICTION_HORIZON,
+    DL_FORECAST_OPTIONS,
+    MODEL_THRESHOLDS,
     PREDICTION_WINDOW_STEPS,
     SIMULATION_BATCH_SIZE,
     SIMULATION_MAX_HISTORY,
@@ -13,6 +16,20 @@ from src.data_loader import load_current_detection_data, load_online_prediction_
 from src.inference import predict_batch
 from src.model_manager import load_model
 from src.prediction import predict_future_risk_batch
+
+
+def _is_dl_detection_model(model_name: str) -> bool:
+    return model_name in DL_FORECAST_OPTIONS
+
+
+def _current_detection_artifact(model_name: str) -> dict:
+    return {
+        "available": True,
+        "model_display_name": f"{model_name} (Current)",
+        "model_path": AVAILABLE_MODELS[model_name],
+        "threshold": MODEL_THRESHOLDS.get(model_name, {}).get("Current", 0.5),
+        "artifact_source": "current_detection_sequence",
+    }
 
 
 def _trim_history(df: pd.DataFrame, rows_per_asset: int) -> pd.DataFrame:
@@ -30,18 +47,27 @@ def _trim_history(df: pd.DataFrame, rows_per_asset: int) -> pd.DataFrame:
     )
 
 
-def _run_current_detection_step() -> bool:
-    """Run the current-detection path on df_simulation.csv and 105 features."""
-    current_detection_df = load_current_detection_data()
+def _run_current_detection_step(prediction_df: pd.DataFrame | None = None) -> bool:
+    """Run current detection using the model contract selected in the UI."""
+    selected_model = st.session_state.selected_model
+    uses_dl_detection = _is_dl_detection_model(selected_model)
+    current_detection_df = (
+        prediction_df.copy()
+        if uses_dl_detection and prediction_df is not None
+        else load_online_prediction_data()
+        if uses_dl_detection
+        else load_current_detection_data()
+    )
     if current_detection_df.empty:
         return False
 
     current_detection_dfs = split_by_turbine(current_detection_df)
-    running_model = load_model(st.session_state.selected_model)
+    running_model = None if uses_dl_detection else load_model(selected_model)
     st.session_state.setdefault("current_detection_turbine_steps", {tid: 0 for tid in TARGET_TURBINES})
     st.session_state.setdefault("current_detection_stream_done", {tid: False for tid in TARGET_TURBINES})
     st.session_state.setdefault("current_detection_history_data", pd.DataFrame())
     st.session_state.setdefault("anomaly_records", [])
+    detection_artifact = _current_detection_artifact(selected_model) if uses_dl_detection else None
 
     new_rows = []
     any_active = False
@@ -59,10 +85,23 @@ def _run_current_detection_step() -> bool:
             st.session_state.current_detection_stream_done[tid] = True
             continue
 
-        pred_labels, pred_probas = predict_batch(running_model, batch)
+        if uses_dl_detection:
+            current_detection = predict_future_risk_batch(
+                asset_id=tid,
+                history=st.session_state.current_detection_history_data,
+                batch=batch,
+                horizon="Current",
+                artifact=detection_artifact,
+            )
+            pred_labels = current_detection["labels"]
+            pred_probas = current_detection["scores"]
+            batch["current_detection_status"] = current_detection["statuses"]
+        else:
+            threshold = float(MODEL_THRESHOLDS.get(selected_model, {}).get("Current", 0.5))
+            pred_labels, pred_probas = predict_batch(running_model, batch, threshold=threshold)
         batch["pred_label"] = pred_labels
         batch["anomaly_score"] = pred_probas
-        batch["model_used"] = st.session_state.selected_model
+        batch["model_used"] = selected_model
 
         new_rows.append(batch)
         any_active = True
@@ -108,7 +147,7 @@ def run_simulation_step():
     # của tick hiện tại khi vòng lặp prediction bên dưới cố merge pred_label vào batch.
     # Trước đây _run_current_detection_step() được gọi SAU vòng lặp → pred_label luôn
     # lệch 1 tick (merge chỉ thấy kết quả batch N-1 chứ không phải batch N).
-    _run_current_detection_step()
+    _run_current_detection_step(prediction_df)
 
     # 🌟 BƯỚC 1: Lấy artifact cấu hình chuẩn (đường dẫn chuẩn + threshold động) từ UI lưu trong Session State
     active_artifact = st.session_state.get("active_prediction_artifact", None)
@@ -152,14 +191,23 @@ def run_simulation_step():
             ].copy()
             
             if not tid_current.empty:
-                # First try to map by `sequence_id` (stable across datasets)
+                # First try to map by row-level keys. Joining by sequence_id alone
+                # duplicates rows because each event contains many timestamps.
                 if "sequence_id" in batch.columns and "sequence_id" in tid_current.columns:
-                    merge_cols = [c for c in ("sequence_id", "pred_label", "anomaly_score") if c in tid_current.columns]
+                    join_keys = ["sequence_id"]
+                    if "id" in batch.columns and "id" in tid_current.columns:
+                        join_keys.append("id")
+                    elif "time_stamp" in batch.columns and "time_stamp" in tid_current.columns:
+                        join_keys.append("time_stamp")
+                    merge_cols = [
+                        c
+                        for c in [*join_keys, "pred_label", "anomaly_score"]
+                        if c in tid_current.columns
+                    ]
                     if "pred_label" in tid_current.columns:
                         left = batch
-                        right = tid_current[[c for c in ("sequence_id", "pred_label", "anomaly_score") if c in tid_current.columns]]
-                        # perform left merge on sequence_id
-                        batch = pd.merge(left, right, on="sequence_id", how="left", suffixes=(None, "_det"))
+                        right = tid_current[merge_cols].drop_duplicates(join_keys)
+                        batch = pd.merge(left, right, on=join_keys, how="left", suffixes=(None, "_det"))
                         # normalize columns: prefer detection values from `tid_current`
                         # If merge produced *_det columns, use them; otherwise if `pred_label`/`anomaly_score`
                         # exist (coming from right-side selection), keep them. Only default when missing.

@@ -18,7 +18,7 @@ def _expects_sequence_input(model) -> bool:
     return isinstance(input_shape, tuple) and len(input_shape) == 3
 
 
-def predict_batch(model, batch: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+def predict_batch(model, batch: pd.DataFrame, threshold: float = 0.5) -> tuple[np.ndarray, np.ndarray]:
     if model is None:
         return _fallback_from_labels(batch)
 
@@ -31,11 +31,11 @@ def predict_batch(model, batch: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
     try:
         if hasattr(model, 'predict_proba'):
             pred_probas = model.predict_proba(X)[:, 1]
-            pred_labels = (pred_probas >= 0.65).astype(int)
+            pred_labels = (pred_probas >= threshold).astype(int)
         else:
             raw_pred = np.asarray(model.predict(X)).reshape(-1)
             pred_probas = raw_pred.astype(float)
-            pred_labels = (pred_probas >= 0.65).astype(int)
+            pred_labels = (pred_probas >= threshold).astype(int)
     except Exception:
         return _fallback_from_labels(batch)
     return pred_labels, pred_probas

@@ -12,8 +12,9 @@ import numpy as np
 
 from src.sidebar import render_sidebar
 from src.config import (
-    STATUS_COLORS, 
+    STATUS_COLORS,
     get_sensor_label,
+    get_sensor_unit,
     SENSOR_GROUPS,
     TARGET_TURBINES,
     TURBINE_LABELS
@@ -37,16 +38,22 @@ is_running = st.session_state.get("is_monitoring", False)
 
 active_model = st.session_state.get("selected_model", "XGBoost").upper()
 is_ml_flow = any(kw in active_model for kw in ["XGBOOST", "RANDOM FOREST"])
+has_current_detection = not current_det.empty and "pred_label" in current_det.columns
 
 if not history.empty or not current_det.empty:
     chart_data_list = []
     
-    if is_ml_flow:
+    if has_current_detection:
         if not current_det.empty and "pred_label" in current_det.columns:
             for tid in TARGET_TURBINES:
-                sub = current_det[current_det["asset_id"].astype(str).str.contains(str(tid))].copy()
+                sub = current_det[
+                    pd.to_numeric(current_det["asset_id"], errors="coerce")
+                    .fillna(-1)
+                    .astype(int)
+                    .eq(tid)
+                ].copy()
                 if not sub.empty:
-                    anomalies = int(sub["pred_label"].sum())
+                    anomalies = int(pd.to_numeric(sub["pred_label"], errors="coerce").fillna(0).sum())
                     total_points = len(sub)
                     # Tính toán tỷ lệ % lỗi (tránh chia cho 0)
                     anomaly_rate = (anomalies / total_points * 100) if total_points > 0 else 0.0
@@ -55,7 +62,7 @@ if not history.empty or not current_det.empty:
                         "Turbine": TURBINE_LABELS[tid],
                         "Anomaly Rate (%)": round(anomaly_rate, 2),
                         "Anomaly Count": anomalies,
-                        "Flow Type": "ML Current Detection"
+                        "Flow Type": "Current Detection"
                     })
     else:
         if not history.empty and "future_risk_label" in history.columns:
@@ -88,7 +95,7 @@ if not history.empty or not current_det.empty:
         
     with col2:
         total_anomalies = int(anomaly_summary_df["Anomaly Count"].sum()) if not anomaly_summary_df.empty else 0
-        flow_label = "ML Faults" if is_ml_flow else "DL Risks"
+        flow_label = "Current Faults" if has_current_detection else "DL Risks"
         st.metric(f"Total Detected ({flow_label})", f"{total_anomalies} pts")
         
     with col3:
@@ -130,18 +137,27 @@ if not history.empty or not current_det.empty:
                 showlegend=False
             )
             # --- PHẦN THAY ĐỔI: ÉP KHUNG TỪ 0% ĐẾN 100% CỐ ĐỊNH ---
-            fig.update_yaxes(
-                ticksuffix="%",
-                range=[0, 100]  # Giữ trục Y cố định không bị nhảy co giãn linh hoạt theo dữ liệu
+            max_rate = anomaly_summary_df["Anomaly Rate (%)"].max()
+            y_max = max(20.0, round(max_rate * 1.3 + 2))
+            fig.update_yaxes(ticksuffix="%", range=[0, y_max])
+            fig.add_hline(
+                y=15, line_dash="dash", line_color="#ef4444",
+                annotation_text="Critical 15%", annotation_position="top right",
+                annotation_font_size=10,
             )
-            fig.update_traces(textposition='outside') 
+            fig.add_hline(
+                y=2, line_dash="dot", line_color="#eab308",
+                annotation_text="Warning 2%", annotation_position="top right",
+                annotation_font_size=10,
+            )
+            fig.update_traces(textposition='outside')
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("📊 Hệ thống đang vận hành ổn định, chưa ghi nhận điểm bất thường nào trên cả 5 Tuabin.")
 
     with kpi_col:
         st.subheader("Live Component Status")
-        
+
         for tid in TARGET_TURBINES:
             t_rate = 0.0
             t_count = 0
@@ -150,20 +166,34 @@ if not history.empty or not current_det.empty:
                 if not t_match.empty:
                     t_rate = float(t_match["Anomaly Rate (%)"].iloc[0])
                     t_count = int(t_match["Anomaly Count"].iloc[0])
-            
-            if t_rate > 15.0: 
+
+            last_ts = None
+            if has_current_detection and not current_det.empty and "time_stamp" in current_det.columns:
+                t_ts_df = current_det[
+                    pd.to_numeric(current_det["asset_id"], errors="coerce").fillna(-1).astype(int).eq(tid)
+                ]
+                if not t_ts_df.empty:
+                    last_ts = pd.to_datetime(t_ts_df["time_stamp"].iloc[-1], errors="coerce")
+            elif not history.empty and "time_stamp" in history.columns:
+                t_ts_df = history[history["asset_id"].eq(tid)].sort_values("time_stamp")
+                if not t_ts_df.empty:
+                    last_ts = pd.to_datetime(t_ts_df["time_stamp"].iloc[-1], errors="coerce")
+            ts_str = last_ts.strftime("%m/%d %H:%M") if last_ts is not None and pd.notna(last_ts) else "–"
+
+            if t_rate > 15.0:
                 status_color = "🔴 Critical"
-                help_text = "High frequency of alerts. Immediate technical inspection recommended."
-            elif t_rate > 2.0: 
+                action_text = "Initiate emergency shutdown procedure. Dispatch on-site technician immediately. Log incident in CMMS."
+            elif t_rate > 2.0:
                 status_color = "🟡 Warning"
-                help_text = "Minor anomalies or early sign of risk detected. Monitor parameters closely."
+                action_text = "Schedule inspection before next shift. Reduce load if possible. Flag work order in maintenance system."
             else:
                 status_color = "🟢 Normal"
-                help_text = "Parameters are within safe threshold boundaries."
-                
+                action_text = "No action required. Continue standard 24h monitoring protocol."
+
             with st.container(border=True):
                 st.markdown(f"**{TURBINE_LABELS[tid]}** : {status_color}")
-                st.caption(f"Rate: `{t_rate}%` ({t_count} pts) · {help_text}")
+                st.caption(f"Rate: `{t_rate}%` ({t_count} pts) · Updated: {ts_str}")
+                st.markdown(f"**Action:** {action_text}")
 
     st.divider()
 
@@ -203,11 +233,13 @@ if not history.empty or not current_det.empty:
                                     else:
                                         delta_str = None
                                     
+                                    sensor_unit = get_sensor_unit(sensor)
+                                    delta_color = "inverse" if sensor_unit == "°C" else "normal"
                                     st.metric(
-                                        label=label, 
-                                        value=f"{curr_val:.2f}", 
+                                        label=label,
+                                        value=f"{curr_val:.2f}",
                                         delta=delta_str,
-                                        delta_color="normal"
+                                        delta_color=delta_color,
                                     )
                             else:
                                 st.caption("No data for this asset.")

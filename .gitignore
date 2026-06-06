@@ -17,6 +17,9 @@ env/
 ENV/
 venv_tf213/
 
+# Agent files 
+.claude
+
 # OS files
 .DS_Store
 

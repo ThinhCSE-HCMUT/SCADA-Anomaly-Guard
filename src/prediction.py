@@ -14,6 +14,7 @@ import streamlit as st
 
 from src.config import (
     DEFAULT_PREDICTION_HORIZON,
+    DETECTION_SCALER_DIR,
     PREDICTION_CLASSIFIER_EXPORT_DIR,
     PREDICTION_HORIZON_RUNS,
     PREDICTION_RESULTS_ROOT,
@@ -419,7 +420,7 @@ def predict_future_risk_batch(
         }
 
     # --- PHÂN LUỒNG TẢI MÔ HÌNH DL (.keras) ---
-    scaler_dir = Path("models/DeepLearning/detection_scalers")
+    scaler_dir = DETECTION_SCALER_DIR if selected_horizon == "Current" else PREDICTION_SCALER_DIR
     scaler_path = scaler_dir / f"asset_{asset_id}.pkl"
     if not scaler_path.exists():
         return _empty_result(batch_len, selected_horizon, f"Prediction scaler not found: {scaler_path}")

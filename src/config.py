@@ -15,7 +15,7 @@ ASSETS_DIR       = ROOT_DIR / "assets"
 # Local copied training-result artifacts used for sequence prediction.
 PREDICTION_RESULTS_ROOT = MODELS_DIR / "DeepLearning"
 
-# External training repo exports used for online feature metadata and scalers.
+# External processing export used for online feature metadata.
 TRAINING_REPO_DIR = Path(r"D:\Final Project\scada-fault-prediction")
 PREDICTION_CLASSIFIER_EXPORT_DIR = (
     TRAINING_REPO_DIR
@@ -25,8 +25,10 @@ PREDICTION_CLASSIFIER_EXPORT_DIR = (
     / "window_24h"
     / "classifier"
 )
-PREDICTION_SCALER_DIR = PREDICTION_CLASSIFIER_EXPORT_DIR / "scalers"
-DETECTION_SCALER_DIR  = MODELS_DIR / "DeepLearning" / "detection_scalers"
+
+# Local per-asset 21-feature scalers used by the dashboard sequence models.
+PREDICTION_SCALER_DIR = MODELS_DIR / "scaler-prediction-model" / "scalers"
+DETECTION_SCALER_DIR  = MODELS_DIR / "scaler-detection-model" / "scalers"
 
 # Data files
 # df_simulation.csv is the flat-feature stream for current fault detection.
@@ -207,6 +209,36 @@ WARNING_THRESHOLD = 0.45
 TARGET_TURBINES = [0, 10, 11, 13, 21]
 TURBINE_LABELS  = {tid: f"WT-{tid:03d}" for tid in TARGET_TURBINES}
 
+# Representative raw Wind Farm A events used by the Real-time Monitor stream.
+# Each target turbine contributes one event instead of streaming all 22 events.
+REALTIME_REPRESENTATIVE_EVENTS = {
+    0: {
+        "event_id": 26,
+        "event_label": "anomaly",
+        "fault_type": "Hydraulic group",
+    },
+    10: {
+        "event_id": 40,
+        "event_label": "anomaly",
+        "fault_type": "Gearbox bearing",
+    },
+    11: {
+        "event_id": 92,
+        "event_label": "normal",
+        "fault_type": "",
+    },
+    13: {
+        "event_id": 14,
+        "event_label": "normal",
+        "fault_type": "",
+    },
+    21: {
+        "event_id": 22,
+        "event_label": "anomaly",
+        "fault_type": "Hydraulic group",
+    },
+}
+
 # ====================== SENSOR / FEATURE COLUMNS ======================
 # Columns shown on charts (17 base sensor aggregates — before `label` column)
 CHART_SENSOR_COLS = [
@@ -218,6 +250,7 @@ CHART_SENSOR_COLS = [
     'sensor_44', 'reactive_power_28_min', 'reactive_power_28_max',
     'wind_speed_3_min',
 ]
+
 
 # Rolling-window engineered columns (84 cols: mean/std × window 3 & 6)
 _ROLLING_COLS = [

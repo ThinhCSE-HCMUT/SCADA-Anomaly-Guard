@@ -5,6 +5,7 @@ from src.config import (
     RAW_WIND_FARM_A_DATASETS_DIR,
     RAW_WIND_FARM_A_EVENT_INFO,
     REALTIME_DATA_PATH,
+    REALTIME_REPRESENTATIVE_EVENTS,
     TARGET_TURBINES,
 )
 from src.online_preprocessor import (
@@ -91,11 +92,14 @@ def load_online_prediction_data(
         required_cols = required_raw_columns_for_features(feature_cols)
         parts = []
         if event_id is not None:
-            csv_paths = [RAW_WIND_FARM_A_DATASETS_DIR / f"{int(event_id)}.csv"]
+            csv_specs = [(RAW_WIND_FARM_A_DATASETS_DIR / f"{int(event_id)}.csv", None)]
         else:
-            csv_paths = sorted(RAW_WIND_FARM_A_DATASETS_DIR.glob("*.csv"), key=_event_sort_key)
+            csv_specs = [
+                (RAW_WIND_FARM_A_DATASETS_DIR / f"{int(meta['event_id'])}.csv", int(asset_id))
+                for asset_id, meta in REALTIME_REPRESENTATIVE_EVENTS.items()
+            ]
 
-        for csv_path in csv_paths:
+        for csv_path, selected_asset_id in csv_specs:
             if not csv_path.exists():
                 st.error(f"Selected Wind Farm A event file is missing: {csv_path}")
                 continue
@@ -111,6 +115,9 @@ def load_online_prediction_data(
                     df["sequence_id"] = int(csv_path.stem)
                 except ValueError:
                     df["sequence_id"] = csv_path.stem
+            if selected_asset_id is not None:
+                df["asset_id"] = pd.to_numeric(df["asset_id"], errors="coerce")
+                df = df[df["asset_id"].eq(selected_asset_id)].copy()
             parts.append(df)
 
         if not parts:
@@ -125,15 +132,51 @@ def load_online_prediction_data(
         raw_df = raw_df[raw_df["asset_id"].isin(TARGET_TURBINES)].copy()
 
         prepared = prepare_raw_prediction_frame(raw_df, feature_cols)
-        if event_id is not None and not prepared.empty:
+        if not prepared.empty:
             event_info = load_event_info()
-            event_row = event_info[event_info["event_id"].eq(int(event_id))]
-            if not event_row.empty:
-                meta = event_row.iloc[0]
-                prepared["event_label"] = meta.get("event_label", "")
-                prepared["event_description"] = meta.get("event_description", "")
-                prepared["event_start"] = meta.get("event_start", pd.NaT)
-                prepared["event_end"] = meta.get("event_end", pd.NaT)
+            if not event_info.empty and "sequence_id" in prepared.columns:
+                meta_cols = [
+                    "event_id",
+                    "event_label",
+                    "event_description",
+                    "event_start",
+                    "event_end",
+                ]
+                available_meta_cols = [col for col in meta_cols if col in event_info.columns]
+                prepared = prepared.merge(
+                    event_info[available_meta_cols],
+                    left_on="sequence_id",
+                    right_on="event_id",
+                    how="left",
+                ).drop(columns=["event_id"], errors="ignore")
+
+                if event_id is None:
+                    override_rows = []
+                    for asset_id, meta in REALTIME_REPRESENTATIVE_EVENTS.items():
+                        override_rows.append(
+                            {
+                                "asset_id": int(asset_id),
+                                "sequence_id": int(meta["event_id"]),
+                                "configured_event_label": meta.get("event_label", ""),
+                                "configured_fault_type": meta.get("fault_type", ""),
+                            }
+                        )
+                    overrides = pd.DataFrame(override_rows)
+                    prepared = prepared.merge(
+                        overrides,
+                        on=["asset_id", "sequence_id"],
+                        how="left",
+                    )
+                    prepared["event_label"] = prepared["configured_event_label"].combine_first(
+                        prepared.get("event_label", pd.Series(index=prepared.index, dtype=object))
+                    )
+                    prepared["event_description"] = prepared["configured_fault_type"].combine_first(
+                        prepared.get("event_description", pd.Series(index=prepared.index, dtype=object))
+                    )
+                    prepared = prepared.drop(
+                        columns=["configured_event_label", "configured_fault_type"],
+                        errors="ignore",
+                    )
 
         sort_cols = [col for col in ("asset_id", "sequence_id", "time_stamp", "id") if col in prepared.columns]
         return prepared.sort_values(sort_cols, kind="mergesort").reset_index(drop=True)
