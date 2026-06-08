@@ -40,6 +40,8 @@ RAW_WIND_FARM_A_DATASETS_DIR = RAW_WIND_FARM_A_DIR / "datasets"
 RAW_WIND_FARM_A_EVENT_INFO = RAW_WIND_FARM_A_DIR / "event_info.csv"
 LOCAL_PREDICTION_FEATURE_FILE = DATA_DIR / "feature_screening_per_event" / "final_21_features.csv"
 RAW_PREDICTION_SPLIT = "prediction"
+REALTIME_DEMO_NORMALIZE_TIMESTAMPS = True
+REALTIME_DEMO_START_TIMESTAMP = "2023-01-01 00:00:00"
 
 # ====================== MODEL CONFIGURATION ======================
 AVAILABLE_MODELS = {
@@ -213,19 +215,19 @@ TURBINE_LABELS  = {tid: f"WT-{tid:03d}" for tid in TARGET_TURBINES}
 # Each target turbine contributes one event instead of streaming all 22 events.
 REALTIME_REPRESENTATIVE_EVENTS = {
     0: {
-        "event_id": 26,
-        "event_label": "anomaly",
-        "fault_type": "Hydraulic group",
+        "event_id": 24,
+        "event_label": "normal",
+        "fault_type": "",
     },
     10: {
         "event_id": 40,
         "event_label": "anomaly",
-        "fault_type": "Gearbox bearing",
+        "fault_type": "gearbox bearing",
     },
     11: {
-        "event_id": 92,
-        "event_label": "normal",
-        "fault_type": "",
+        "event_id": 68,
+        "event_label": "anomaly",
+        "fault_type": "Transformer Failure",
     },
     13: {
         "event_id": 14,
@@ -235,7 +237,7 @@ REALTIME_REPRESENTATIVE_EVENTS = {
     21: {
         "event_id": 22,
         "event_label": "anomaly",
-        "fault_type": "Hydraulic group",
+        "fault_type": "hydraulic_group",
     },
 }
 
@@ -478,7 +480,7 @@ CHART_CONFIG = {
 
 # ====================== SIMULATION SETTINGS ======================
 SIMULATION_DELAY       = 2.0    # seconds between auto-rerun steps
-SIMULATION_BATCH_SIZE  = 10     # rows per step per turbine
+SIMULATION_BATCH_SIZE  = 6      # rows per step per turbine (1 demo hour at 10-minute cadence)
 SIMULATION_MAX_HISTORY = 150    # max data points kept per turbine in live view
 
 # ====================== DASHBOARD META ======================

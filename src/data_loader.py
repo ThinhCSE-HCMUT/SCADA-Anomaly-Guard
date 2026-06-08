@@ -4,9 +4,12 @@ from src.config import (
     RAW_PREDICTION_SPLIT,
     RAW_WIND_FARM_A_DATASETS_DIR,
     RAW_WIND_FARM_A_EVENT_INFO,
+    REALTIME_DEMO_NORMALIZE_TIMESTAMPS,
+    REALTIME_DEMO_START_TIMESTAMP,
     REALTIME_DATA_PATH,
     REALTIME_REPRESENTATIVE_EVENTS,
     TARGET_TURBINES,
+    PREDICTION_WINDOW_STEPS,
 )
 from src.online_preprocessor import (
     load_online_feature_contract,
@@ -78,6 +81,31 @@ def load_data() -> pd.DataFrame:
     return load_current_detection_data()
 
 
+def _normalize_realtime_demo_timestamps(df: pd.DataFrame) -> pd.DataFrame:
+    """Shift each demo event stream to the same display start time."""
+    if df.empty or "time_stamp" not in df.columns:
+        return df
+
+    normalized = df.copy()
+    normalized["time_stamp"] = pd.to_datetime(normalized["time_stamp"], errors="coerce")
+    group_cols = [
+        col
+        for col in ("asset_id", "sequence_id")
+        if col in normalized.columns
+    ]
+    if not group_cols:
+        group_cols = ["asset_id"] if "asset_id" in normalized.columns else []
+
+    start_ts = pd.Timestamp(REALTIME_DEMO_START_TIMESTAMP)
+    if group_cols:
+        first_ts = normalized.groupby(group_cols)["time_stamp"].transform("min")
+    else:
+        first_ts = normalized["time_stamp"].min()
+
+    normalized["time_stamp"] = start_ts + (normalized["time_stamp"] - first_ts)
+    return normalized
+
+
 @st.cache_data(show_spinner="Loading raw Wind Farm A prediction rows, please wait...")
 def load_online_prediction_data(
     event_id: int | None = None,
@@ -126,7 +154,21 @@ def load_online_prediction_data(
         raw_df = pd.concat(parts, ignore_index=True)
         if "train_test" in raw_df.columns and split:
             raw_df["train_test"] = raw_df["train_test"].astype(str).str.strip().str.lower()
-            raw_df = raw_df[raw_df["train_test"].eq(split.lower())].copy()
+            pred_rows = raw_df[raw_df["train_test"].eq(split.lower())].copy()
+            # Prepend the last PREDICTION_WINDOW_STEPS rows per turbine from the train
+            # split so the DL model warms up on pre-fault patterns and can predict rising
+            # risk before the fault period begins.
+            train_rows = raw_df[raw_df["train_test"].eq("train")].copy()
+            if not train_rows.empty and "asset_id" in train_rows.columns:
+                sort_cols = [c for c in ("asset_id", "time_stamp", "id") if c in train_rows.columns]
+                context = (
+                    train_rows.sort_values(sort_cols)
+                    .groupby("asset_id", group_keys=False)
+                    .tail(PREDICTION_WINDOW_STEPS)
+                )
+            else:
+                context = pd.DataFrame()
+            raw_df = pd.concat([context, pred_rows], ignore_index=True)
 
         raw_df["asset_id"] = pd.to_numeric(raw_df["asset_id"], errors="coerce")
         raw_df = raw_df[raw_df["asset_id"].isin(TARGET_TURBINES)].copy()
@@ -177,6 +219,9 @@ def load_online_prediction_data(
                         columns=["configured_event_label", "configured_fault_type"],
                         errors="ignore",
                     )
+
+            if event_id is None and REALTIME_DEMO_NORMALIZE_TIMESTAMPS:
+                prepared = _normalize_realtime_demo_timestamps(prepared)
 
         sort_cols = [col for col in ("asset_id", "sequence_id", "time_stamp", "id") if col in prepared.columns]
         return prepared.sort_values(sort_cols, kind="mergesort").reset_index(drop=True)

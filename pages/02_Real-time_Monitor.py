@@ -660,7 +660,7 @@ if not current_data.empty and chosen_sensors:
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
             hovermode="x unified",
-            margin=dict(l=60, r=20, t=35, b=40),
+            margin=dict(l=60, r=20, t=35, b=78),
             legend=dict(orientation="h", y=1.01, yanchor="bottom", x=1, xanchor="right", font_size=11),
             transition=dict(duration=0),
         )
@@ -669,9 +669,19 @@ if not current_data.empty and chosen_sensors:
         fig.update_xaxes(
             showgrid=True,
             gridcolor="rgba(255,255,255,0.07)",
-            tickformat="%H:%M",
+            tickformat="%b %d<br>%H:%M",
+            dtick=30 * 60 * 1000,
             tickangle=-30,
-            nticks=12,
+            nticks=10,
+            ticks="outside",
+            tickfont=dict(size=10, color="rgba(255,255,255,0.72)"),
+        )
+        fig.update_xaxes(
+            title_text="Demo timeline",
+            title_font=dict(size=12, color="rgba(255,255,255,0.78)"),
+            showticklabels=True,
+            row=n_chart_rows,
+            col=1,
         )
         fig.update_yaxes(showgrid=True, gridcolor="rgba(255,255,255,0.07)")
 
@@ -679,10 +689,8 @@ if not current_data.empty and chosen_sensors:
         if "time_stamp" in cd.columns and not cd.empty:
             _rng_now = pd.to_datetime(cd["time_stamp"].iloc[-1], errors="coerce")
             if pd.notna(_rng_now):
-                fig.update_layout(
-                    xaxis=dict(range=[_rng_now - pd.Timedelta(hours=2), _rng_now]),
-                    dragmode="pan",
-                )
+                fig.update_xaxes(range=[_rng_now - pd.Timedelta(hours=2), _rng_now])
+                fig.update_layout(dragmode="pan")
 
         _render_live_chart(fig, chart_key)
 
@@ -795,8 +803,12 @@ for tid in TARGET_TURBINES:
                 else:
                     future_score = float("nan")
                     future_label = False
-            n_risk = int(sub_future["future_risk_label"].sum()) if "future_risk_label" in sub_future.columns else 0
-            future_pct = (n_risk / len(sub_future) * 100) if len(sub_future) > 0 else 0.0
+            # Use only the last PREDICTION_WINDOW_STEPS scored rows to avoid
+            # warm-up zeros diluting the percentage
+            _scored_future = sub_future[sub_future["future_risk_score"].notna()] if "future_risk_score" in sub_future.columns else sub_future
+            _recent_future = _scored_future.tail(144)
+            n_risk = int(_recent_future["future_risk_label"].sum()) if "future_risk_label" in _recent_future.columns else 0
+            future_pct = (n_risk / len(_recent_future) * 100) if len(_recent_future) > 0 else 0.0
             fut_ts = pd.to_datetime(last_fut.get("time_stamp"), errors="coerce")
             future_ts_str = fut_ts.strftime("%m/%d %H:%M") if pd.notna(fut_ts) else "–"
 
