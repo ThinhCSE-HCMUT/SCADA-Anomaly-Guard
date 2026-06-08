@@ -53,9 +53,9 @@ if not history.empty or not current_det.empty:
                     .eq(tid)
                 ].copy()
                 if not sub.empty:
-                    anomalies = int(pd.to_numeric(sub["pred_label"], errors="coerce").fillna(0).sum())
-                    total_points = len(sub)
-                    # Tính toán tỷ lệ % lỗi (tránh chia cho 0)
+                    recent = sub.tail(30)
+                    anomalies = int(pd.to_numeric(recent["pred_label"], errors="coerce").fillna(0).sum())
+                    total_points = len(recent)
                     anomaly_rate = (anomalies / total_points * 100) if total_points > 0 else 0.0
                     
                     chart_data_list.append({
@@ -69,9 +69,9 @@ if not history.empty or not current_det.empty:
             for tid in TARGET_TURBINES:
                 sub = history[history["asset_id"].eq(tid)].copy()
                 if not sub.empty:
-                    anomalies = int(sub["future_risk_label"].sum())
-                    total_points = len(sub)
-                    # Tính toán tỷ lệ % rủi ro (tránh chia cho 0)
+                    recent = sub.tail(30)
+                    anomalies = int(recent["future_risk_label"].sum())
+                    total_points = len(recent)
                     anomaly_rate = (anomalies / total_points * 100) if total_points > 0 else 0.0
                     
                     chart_data_list.append({

@@ -34,7 +34,6 @@ from src.config import (
     get_sensor_unit,
     MODEL_THRESHOLDS,
     DL_FORECAST_OPTIONS,
-    SENSOR_OPERATING_LIMITS,
 )
 from src.data_loader import load_online_prediction_data
 from src.model_manager import load_model
@@ -457,20 +456,12 @@ if not current_data.empty and chosen_sensors:
         chart_det_pts = pd.DataFrame()
 
     if valid_sensors:
-        _cur_det_for_chart = st.session_state.get("current_detection_history_data", pd.DataFrame())
-        _has_score = (
-            not _cur_det_for_chart.empty
-            and "anomaly_score" in _cur_det_for_chart.columns
-        )
-        n_chart_rows = len(valid_sensors) + (1 if _has_score else 0)
         fig = make_subplots(
-            rows=n_chart_rows,
+            rows=len(valid_sensors),
             cols=1,
             shared_xaxes=True,
             vertical_spacing=0.025,
-            subplot_titles=[get_sensor_label(col) for col in valid_sensors]
-                + (["Model Confidence Score"] if _has_score else []),
-            row_heights=[1.0] * len(valid_sensors) + ([0.35] if _has_score else []),
+            subplot_titles=[get_sensor_label(col) for col in valid_sensors],
         )
 
         for index, col in enumerate(valid_sensors):
@@ -516,7 +507,23 @@ if not current_data.empty and chosen_sensors:
                     col=1,
                 )
 
-            if not chart_det_pts.empty and col in chart_det_pts.columns:
+            if not chart_det_pts.empty and col in cd.columns:
+                # Snap marker y-values to the sensor line (cd) so dots sit on the trace.
+                # chart_det_pts comes from a different data source (df_simulation.csv)
+                # whose sensor values differ from the raw event CSVs drawn as lines.
+                _cd_lookup = (
+                    cd[["time_stamp", col]]
+                    .copy()
+                    .assign(time_stamp=lambda d: pd.to_datetime(d["time_stamp"], errors="coerce"))
+                )
+                _det_ts = pd.to_datetime(chart_det_pts["time_stamp"], errors="coerce")
+                _snapped_y = pd.merge_asof(
+                    pd.DataFrame({"time_stamp": _det_ts}).sort_values("time_stamp"),
+                    _cd_lookup.sort_values("time_stamp"),
+                    on="time_stamp",
+                    direction="nearest",
+                    tolerance=pd.Timedelta("10min"),
+                )[col].values
                 _score_data = (
                     chart_det_pts["anomaly_score"].values
                     if "anomaly_score" in chart_det_pts.columns
@@ -525,7 +532,7 @@ if not current_data.empty and chosen_sensors:
                 fig.add_trace(
                     go.Scatter(
                         x=chart_det_pts["time_stamp"],
-                        y=chart_det_pts[col],
+                        y=_snapped_y,
                         mode="markers",
                         marker=dict(color=STATUS_COLORS["Anomaly"], size=6, symbol="circle"),
                         name="Current Detection" if row_idx == 1 else None,
@@ -551,26 +558,6 @@ if not current_data.empty and chosen_sensors:
                     col=1,
                 )
 
-            limits = SENSOR_OPERATING_LIMITS.get(col, {})
-            for level, color, dash in [
-                ("warn_hi", "rgba(251,191,36,0.65)", "dot"),
-                ("crit_hi", "rgba(239,68,68,0.80)",  "dash"),
-                ("warn_lo", "rgba(251,191,36,0.65)", "dot"),
-                ("crit_lo", "rgba(239,68,68,0.80)",  "dash"),
-            ]:
-                if level in limits:
-                    fig.add_hline(
-                        y=limits[level],
-                        line_dash=dash,
-                        line_color=color,
-                        line_width=1.0,
-                        row=row_idx,
-                        col=1,
-                        annotation_text=level.replace("_", " "),
-                        annotation_font_size=8,
-                        annotation_font_color=color,
-                    )
-
             fig.update_yaxes(title_text=y_title, title_font_size=10, row=row_idx, col=1)
 
         # "Now" marker — vertical line at the last streamed data point
@@ -590,44 +577,6 @@ if not current_data.empty and chosen_sensors:
                     yshift=-18,
                     bgcolor="rgba(0,0,0,0)",
                 )
-
-        # Score overlay subplot
-        if _has_score:
-            score_row = n_chart_rows
-            _score_tid = _cur_det_for_chart[
-                pd.to_numeric(_cur_det_for_chart["asset_id"], errors="coerce")
-                .fillna(-1).astype(int).eq(selected_asset)
-            ].copy()
-            if not _score_tid.empty:
-                _score_tid["time_stamp"] = pd.to_datetime(_score_tid["time_stamp"], errors="coerce")
-                _active_threshold = st.session_state.get("active_prediction_artifact", {}).get("threshold", 0.5)
-                fig.add_trace(
-                    go.Scatter(
-                        x=_score_tid["time_stamp"],
-                        y=_score_tid["anomaly_score"],
-                        mode="lines",
-                        fill="tozeroy",
-                        fillcolor="rgba(239,68,68,0.15)",
-                        line=dict(color="rgba(239,68,68,0.8)", width=1.2),
-                        name="Anomaly Score",
-                        showlegend=True,
-                        hovertemplate="Score: %{y:.3f}<br>%{x|%H:%M}<extra></extra>",
-                    ),
-                    row=score_row,
-                    col=1,
-                )
-                fig.add_hline(
-                    y=_active_threshold,
-                    line_dash="dash",
-                    line_color="rgba(251,191,36,0.7)",
-                    line_width=1.0,
-                    annotation_text=f"threshold {_active_threshold:.2f}",
-                    annotation_font_size=8,
-                    annotation_font_color="rgba(251,191,36,0.9)",
-                    row=score_row,
-                    col=1,
-                )
-                fig.update_yaxes(title_text="score", title_font_size=9, range=[0, 1], row=score_row, col=1)
 
         # First-fault vertical marker
         _first_ts = _first_alert_ts(
@@ -655,7 +604,7 @@ if not current_data.empty and chosen_sensors:
             )
 
         fig.update_layout(
-            height=max(350, 165 * len(valid_sensors) + (60 if _has_score else 0)),
+            height=max(350, 165 * len(valid_sensors)),
             template="plotly_dark",
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
@@ -680,7 +629,7 @@ if not current_data.empty and chosen_sensors:
             title_text="Demo timeline",
             title_font=dict(size=12, color="rgba(255,255,255,0.78)"),
             showticklabels=True,
-            row=n_chart_rows,
+            row=len(valid_sensors),
             col=1,
         )
         fig.update_yaxes(showgrid=True, gridcolor="rgba(255,255,255,0.07)")
@@ -695,10 +644,6 @@ if not current_data.empty and chosen_sensors:
         _render_live_chart(fig, chart_key)
 
         total = len(cd)
-        scored_mask = cd[score_col].notna() if score_col in cd.columns else pd.Series(False, index=cd.index)
-        scored_total = int(scored_mask.sum())
-        n_risk = int(cd.loc[scored_mask, label_col].sum()) if label_col in cd.columns else 0
-        pending_total = total - scored_total
         window_text = (
             f"showing last {total}/{stream_steps} time steps"
             if stream_steps > total
@@ -706,9 +651,6 @@ if not current_data.empty and chosen_sensors:
         )
         st.caption(
             f"{TURBINE_LABELS[selected_asset]} — "
-            f"{n_risk}/{scored_total} scored anomaly points "
-            f"({(n_risk / scored_total * 100) if scored_total else 0.0:.1f}%)"
-            f"{f' · {pending_total} pending window warm-up rows' if pending_total else ''} · "
             f"{window_text} · "
             f"Model: {model_type_text} · Horizon: {st.session_state.get('prediction_horizon', DEFAULT_PREDICTION_HORIZON)}"
         )
@@ -765,8 +707,9 @@ for tid in TARGET_TURBINES:
         last_det = sub_det.iloc[-1]
         is_current_anom = int(last_det.get("pred_label", 0)) == 1
         current_score = float(last_det.get("anomaly_score", 0.0))
-        detected_count = int(pd.to_numeric(sub_det["pred_label"], errors="coerce").fillna(0).sum()) if "pred_label" in sub_det.columns else 0
-        detected_rate = detected_count / len(sub_det) * 100 if len(sub_det) else 0.0
+        _recent_det = sub_det.tail(30)
+        detected_count = int(pd.to_numeric(_recent_det["pred_label"], errors="coerce").fillna(0).sum()) if "pred_label" in _recent_det.columns else 0
+        detected_rate = detected_count / len(_recent_det) * 100 if len(_recent_det) else 0.0
         latest_ts = pd.to_datetime(last_det.get("time_stamp"), errors="coerce")
         current_ts_str = latest_ts.strftime("%m/%d %H:%M") if pd.notna(latest_ts) else "–"
 
